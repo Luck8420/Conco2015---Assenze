@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Presenze Esordienti 2015</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:560px;margin:0 auto;padding:12px;background:#f4f4f4;color:#222}
+h1{font-size:1.25rem}h3{margin:16px 0 4px}
+select,input,button{font:inherit;padding:9px;border-radius:8px;border:1px solid #bbb;box-sizing:border-box;margin:2px 0}
+select,input:not([type=date]){width:100%}
+button{background:#fff;cursor:pointer}button:disabled{opacity:.5}
+.card{background:#fff;border-radius:10px;padding:10px;margin:8px 0;border-left:7px solid #aaa}
+.card.ROSSA{border-color:#c0392b}.card.BIANCA{border-color:#bbb}
+.card.ass{background:#fdecea}
+</style></head><body>
+<div id="app">Caricamento…</div>
+<script>
+// ===== CONFIGURAZIONE =====
+const API = 'https://script.google.com/macros/s/AKfycbz6El2sqnA7UzjGkLk2-K6M_TX6zDsb5wgk_sg6mH0p9Fn1rVS3ckJXVV4TXDy3Lifqsw/exec';   // URL ottenuto da Apps Script
+const INIZIO = '2026-09-01';              // inizio stagione (per il report)
+// ==========================
+const $ = s => document.querySelector(s);
+const Q = new URLSearchParams(location.search);
+if (Q.get('c')) localStorage.c = Q.get('c');
+const code = localStorage.c || '';
+let D = null, me = localStorage.me || '', month = false, tab = 'ev';
+const GG = ['dom','lun','mar','mer','gio','ven','sab'];
+const iso = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const api = async o => (await fetch(API + '?' + new URLSearchParams({...o, c: code}))).json();
+const nome = n => (D.players.find(x => x[0] == n) || [])[1] || '?';
+const squadra = n => (D.players.find(x => x[0] == n) || [])[2];
+const ab = (ev, p) => D.abs.find(r => r[0] == ev && r[1] == p);
+
+// Calendario fisso: martedì entrambe 18-20, giovedì Bianca 18:30-20, venerdì Rossa 18-19:30, sabato partita
+function recurring(from, to, team) {
+  const r = [];
+  for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
+    const w = d.getDay(), s = iso(d); let t = null, k = 'A';
+    if (w == 2) t = '18:00–20:00';
+    if (w == 4 && team == 'BIANCA') t = '18:30–20:00';
+    if (w == 5 && team == 'ROSSA') t = '18:00–19:30';
+    if (w == 6) { t = ''; k = 'P'; }
+    if (t !== null) r.push({id: s + '_' + team[0] + '_' + k, date: s, time: t, team, k, title: k == 'P' ? 'Partita' : 'Allenamento'});
+  }
+  return r;
+}
+function evs(team, a, b) {
+  const A = iso(a), B = iso(b), r = recurring(a, b, team);
+  D.extras.forEach(x => { if (x[1] >= A && x[1] <= B && (x[3] == 'TUTTE' || x[3] == team)) r.push({id: x[0], date: x[1], time: x[2], team, k: x[4], title: x[5]}); });
+  return r.sort((p, q) => (p.date + p.time).localeCompare(q.date + q.time));
+}
+function range() {
+  const n = new Date(); n.setHours(0,0,0,0);
+  if (month) return [new Date(n.getFullYear(), n.getMonth(), 1), new Date(n.getFullYear(), n.getMonth() + 1, 0)];
+  const m = new Date(n); m.setDate(n.getDate() - ((n.getDay() + 6) % 7));
+  const e = new Date(m); e.setDate(m.getDate() + 6); return [m, e];
+}
+const dl = e => { const d = new Date(e.date + 'T12:00'); return GG[d.getDay()] + ' ' + d.getDate() + '/' + (d.getMonth() + 1); };
+
+function parentView(a, b) {
+  const t = squadra(me);
+  let h = `<p><b>${month ? 'Mese corrente' : 'Settimana corrente'}</b> · squadra ${t} <button id="mm">${month ? 'Solo settimana' : 'Vedi tutto il mese'}</button></p>`;
+  evs(t, a, b).forEach(e => {
+    const x = ab(e.id, me);
+    h += `<div class="card ${t} ${x ? 'ass' : ''}"><b>${dl(e)}</b> ${esc(e.time)} · ${esc(e.title)}${x ? ' — <b>ASSENTE</b>' : ''}<br>
+      <input class="nt" maxlength="200" placeholder="Motivo / note (facoltativo)" value="${esc(x ? x[2] : '')}">
+      ${x ? `<button data-ev="${e.id}" data-st="A">Aggiorna nota</button> <button data-ev="${e.id}" data-st="OK">Sarà presente</button>`
+          : `<button data-ev="${e.id}" data-st="A">Segnala assenza</button>`}</div>`;
+  });
+  return h;
+}
+function adminView(a, b) {
+  let h = `<h3>Assenti ${month ? 'del mese' : 'della settimana'}</h3><button id="mm">${month ? 'Solo settimana' : 'Tutto il mese'}</button> <button id="rf">↻ Aggiorna</button>`;
+  ['BIANCA', 'ROSSA'].forEach(t => evs(t, a, b).forEach(e => {
+    const as = D.abs.filter(r => r[0] == e.id && squadra(r[1]) == t);
+    h += `<div class="card ${t}"><b>${t} · ${dl(e)}</b> ${esc(e.time)} ${esc(e.title)}<br><b>${as.length} assenti su ${D.players.filter(p => p[2] == t).length}</b><br>${as.length ? as.map(r => esc(nome(r[1])) + (r[2] ? ' (' + esc(r[2]) + ')' : '')).join('; ') : 'nessuna assenza'}</div>`;
+  }));
+  h += `<h3>Aggiungi evento extra</h3><div class="card"><input type="date" id="ed"> <input id="et" placeholder="Orario (es. 10:00–12:00)">
+    <select id="etm"><option>TUTTE</option><option>BIANCA</option><option>ROSSA</option></select>
+    <select id="ek"><option value="A">Allenamento / altro</option><option value="P">Partita</option></select>
+    <input id="eti" maxlength="80" placeholder="Titolo (es. Partita domenica vs …)"><button id="ea">Aggiungi</button></div>
+    <h3>Report</h3><button id="rp">⬇ Scarica report presenze (CSV per Excel)</button>`;
+  return h;
+}
+function render() {
+  const [a, b] = range();
+  let h = `<h1>⚽ Esordienti 2015 – presenze</h1><select id="pl"><option value="">Scegli il giocatore…</option>` +
+    D.players.map(p => `<option value="${p[0]}" ${p[0] == me ? 'selected' : ''}>${esc(p[1])}</option>`).join('') + `</select>`;
+  if (D.admin) h += `<p><button data-t="ev">Vista genitore</button> <button data-t="adm">Vista dirigente</button></p>`;
+  if (D.admin && tab == 'adm') h += adminView(a, b); else if (me) h += parentView(a, b);
+  $('#app').innerHTML = h;
+}
+function report() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  let csv = '\ufeffGiocatore;Squadra;Allenamenti;Assenze allenamenti;Partite;Assenze partite;% presenza\n';
+  D.players.forEach(p => {
+    const ev = evs(p[2], new Date(INIZIO), today); let ta = 0, aa = 0, tp = 0, ap = 0;
+    ev.forEach(e => { const x = ab(e.id, p[0]) ? 1 : 0; if (e.k == 'P') { tp++; ap += x; } else { ta++; aa += x; } });
+    const tot = ta + tp, pct = tot ? Math.round(100 * (tot - aa - ap) / tot) : '';
+    csv += `"${p[1]}";${p[2]};${ta};${aa};${tp};${ap};${pct}\n`;
+  });
+  const l = document.createElement('a');
+  l.href = URL.createObjectURL(new Blob([csv], {type: 'text/csv'}));
+  l.download = 'report_presenze_' + iso(today) + '.csv'; l.click();
+}
+
+$('#app').onchange = e => { if (e.target.id == 'pl') { me = e.target.value; localStorage.me = me; render(); } };
+$('#app').onclick = async e => {
+  const t = e.target;
+  if (t.dataset.t) { tab = t.dataset.t; render(); }
+  else if (t.id == 'mm') { month = !month; render(); }
+  else if (t.id == 'rp') report();
+  else if (t.id == 'rf') { t.disabled = true; await reload(); }
+  else if (t.dataset.ev) {
+    t.disabled = true;
+    const note = t.parentElement.querySelector('.nt').value.trim(), st = t.dataset.st, ev = t.dataset.ev;
+    try {
+      const r = await api({action: 'set', ev, p: me, st, note});
+      if (!r.ok) throw 0;
+      D.abs = D.abs.filter(x => !(x[0] == ev && x[1] == me));
+      if (st == 'A') D.abs.push([ev, me, note, '']);
+    } catch (_) { alert('Errore di connessione, riprova.'); }
+    render();
+  } else if (t.id == 'ea') {
+    const o = {date: $('#ed').value, time: $('#et').value, team: $('#etm').value, k: $('#ek').value, title: $('#eti').value.trim()};
+    if (!o.date || !o.title) return alert('Servono almeno data e titolo.');
+    const r = await api({action: 'add', ...o});
+    if (r.ok) { D.extras.push([r.id, o.date, o.time, o.team, o.k, o.title]); render(); } else alert('Errore, riprova.');
+  }
+};
+async function reload() {
+  try { const d = await api({action: 'init'}); if (!d.error) { D = d; render(); } } catch (_) {}
+}
+// la vista dirigente si aggiorna da sola ogni 30 secondi (non quella dei genitori, per non cancellare le note che stanno scrivendo)
+setInterval(() => { if (D && D.admin && tab == 'adm' && !document.hidden) reload(); }, 30000);
+(async () => {
+  try {
+    D = await api({action: 'init'});
+    if (D.error) { $('#app').innerHTML = '<p>Codice non valido: usa il link ricevuto dalla società.</p>'; return; }
+    if (D.admin) tab = 'adm';
+    render();
+  } catch (_) { $('#app').innerHTML = '<p>Impossibile caricare i dati. Riprova più tardi.</p>'; }
+})();
+</script></body></html>

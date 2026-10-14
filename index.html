@@ -69,6 +69,7 @@ small{color:#666}
 .ico{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:50%;background:var(--c1);color:#fff;font-size:15px;line-height:1}
 .big{position:absolute;right:3px;bottom:3px;width:60%;height:60%;border-radius:50%;background:#fff;color:var(--c1);display:grid;place-items:center;font-size:clamp(16px,6.5vw,30px);font-weight:800;box-shadow:0 1px 4px #0005}
 .canc{text-decoration:line-through;opacity:.6}
+.btns{display:flex;flex-wrap:nowrap;gap:8px;margin:8px 0}
 .tag{display:inline-block;background:#555;color:#fff;border-radius:6px;padding:0 6px;font-size:.75rem;margin-left:4px}
 </style></head><body>
 <header><img id="logo" src="stemma.png" alt="" onerror="this.remove()">
@@ -198,7 +199,8 @@ function detail() {
   ['BIANCA', 'ROSSA'].forEach(t => evs(t, d, d, true).forEach(e => {
     const as = D.abs.filter(r => r.ev == e.id && squadra(r.p) == t).sort((p, q) => nome(p.p).localeCompare(nome(q.p)));
     const open = as.find(r => selN == e.id + '__' + r.p);
-    h += `<div class="card ${t}"><b>${t == 'BIANCA' ? 'Bianca' : 'Rossa'}</b> · <span class="${e.canc ? 'canc' : ''}">${esc(e.time)} ${ttl(e)}</span>${e.canc ? '<span class="tag">ANNULLATO</span>' : ''} <button data-edit="${e.id}">Modifica</button>${e.x ? ` <button data-del="${e.id}">Elimina</button>` : ''}<br>
+    h += `<div class="card ${t}"><div><b>${t == 'BIANCA' ? 'Bianca' : 'Rossa'}</b> · <span class="${e.canc ? 'canc' : ''}">${esc(e.time)} ${ttl(e)}</span>${e.canc ? '<span class="tag">ANNULLATO</span>' : ''}</div>
+      <div class="btns"><button data-edit="${e.id}">Modifica</button>${e.x ? `<button data-del="${e.id}">Elimina</button>` : ''}</div>
       <b>${as.length} assenti su ${tot(t)}</b><div class="chips">${as.length ? as.map(r => `<button class="chip${open == r ? ' on' : ''}" data-n="${e.id}__${r.p}">${esc(nome(r.p))}</button>`).join('') : 'nessuna assenza'}</div>
       ${open ? `<div class="nota"><b>${esc(nome(open.p))}</b>: ${esc(open.note) || 'nessuna nota'}</div>` : ''}</div>`;
   }));
@@ -208,7 +210,7 @@ function detail() {
 function render() {
   if (document.activeElement && document.activeElement.id == 'pl') return;
   const sv = staffView();
-  $('#hr').innerHTML = admin ? `<button class="${!sv ? 'on' : ''}" data-t="ev">Genitore</button> <button class="${sv ? 'on' : ''}" data-t="adm">Staff</button>` : `<button id="st">Staff</button>`;
+  $('#hr').innerHTML = admin ? `<button class="${!sv ? 'on' : ''}" data-t="ev">Genitore</button> <button class="${sv ? 'on' : ''}" data-t="adm">Staff</button>` : `<button class="on" data-t="ev">Genitore</button> <button id="st">Staff</button>`;
   const ICON = '<svg viewBox="0 0 32 32"><circle cx="16" cy="6.5" r="4.5"/><path d="M9 13.5l5-3h4l5 3 2.5 6.5-4 1.5V30H10.5V21.5L6.5 20z"/><circle cx="27" cy="27" r="3.2"/></svg>';
   let h = sv ? '' : `<div class="sel-box"><div class="lab">${ICON} Seleziona giocatore</div><select id="pl"><option value="">Scegli il giocatore…</option>${D.players.map(p => `<option value="${p.n}" ${p.n == me ? 'selected' : ''}>${esc(p.nome)}</option>`).join('')}</select>${squadra(me) ? '<small class="okm">✓ Ricordato su questo telefono · puoi cambiarlo quando vuoi</small>' : ''}</div>`;
   h += `<div class="row"><div><button class="${vw == 'w' ? 'on' : ''}" data-vw="w">Settimana</button> <button class="${vw == 'm' ? 'on' : ''}" data-vw="m">Mese</button></div>` +
@@ -251,10 +253,13 @@ function openModal(k, d) {
       ${e.x ? '' : `<p><label><input type="checkbox" id="mc" style="width:auto" ${e.canc ? 'checked' : ''}> Evento annullato (i genitori non lo vedono)</label></p>`}
       <button class="pri" data-save="${e.id}" data-x="${e.x ? 1 : 0}">Salva</button>${e.x ? '' : ` <button data-reset="${e.id}">Ripristina predefinito</button>`}`;
   }
+  else if (k == 'pin') h = `<h3>Area staff</h3><p>${cfg === false ? 'Prima volta: scegli un PIN (almeno 4 caratteri).' : 'Inserisci il PIN.'}</p>
+    <input type="password" id="pin" autocomplete="off" placeholder="PIN"><small id="perr" class="bad"></small><br><button class="pri" id="pok">Entra</button>`;
   else if (k == 'rep') h = `<h3>Report presenze</h3><small>Dal</small><input type="date" id="rf" value="${INIZIO}"><small>Al</small><input type="date" id="rt" value="${iso(new Date())}">
     <button class="pri" id="dr">⬇ Scarica CSV (Excel)</button><p><small>Conta solo gli eventi già trascorsi. Chi non ha segnalato assenza risulta presente.</small></p>`;
   else if (k == 'pl') h = `<h3>Elenco giocatori</h3><p>${D.players.length} giocatori caricati. Per caricarli o aggiornarli scegli il file giocatori.csv:</p><input type="file" id="csv" accept=".csv,text/csv,text/plain">`;
   mod.innerHTML = `<div class="ov"><div class="mb"><button data-close style="float:right">✕</button>${h}</div></div>`;
+  if (k == 'pin') $('#pin').focus();
 }
 const closeModal = () => { mod.innerHTML = ''; };
 
@@ -273,17 +278,19 @@ function report(from, to) {
   l.href = URL.createObjectURL(new Blob([csv], {type: 'text/csv'}));
   l.download = `report_presenze_${from}_${iso(B)}.csv`; l.click();
 }
-async function staff() {
-  const r = ref('config', 'staff'), s = await getDoc(r); let pin;
-  if (!s.exists()) {
-    pin = prompt('Prima volta: scegli un PIN per l\'area staff (almeno 4 caratteri)');
-    if (!pin || pin.length < 4) return;
-    await setDoc(r, {pin});
-  } else {
-    pin = prompt('PIN area staff');
-    if (pin !== s.data().pin) { if (pin !== null) alert('PIN errato'); return; }
-  }
-  store.set('pin', pin); admin = true; tab = 'adm'; render();
+let cfg = null;   // PIN staff dal database: {pin} | false (non ancora creato) | null (non ancora letto)
+function checkAuto() { const p = store.get('pin'); if (!admin && p && cfg && cfg.pin === p) { admin = true; tab = 'adm'; render(); } }
+async function submitPin() {
+  const pin = $('#pin').value.trim(), err = $('#perr');
+  if (!pin) return;
+  try {
+    if (cfg === null) { const s = await getDoc(ref('config', 'staff')); cfg = s.exists() ? s.data() : false; }
+    if (cfg === false) {
+      if (pin.length < 4) { err.textContent = 'Il PIN deve avere almeno 4 caratteri.'; return; }
+      await setDoc(ref('config', 'staff'), {pin}); cfg = {pin};
+    } else if (cfg.pin !== pin) { err.textContent = 'PIN errato, riprova.'; return; }
+  } catch (_) { err.textContent = 'Connessione assente, riprova.'; return; }
+  store.set('pin', pin); admin = true; tab = 'adm'; closeModal(); render();
 }
 
 document.body.onchange = async e => {
@@ -301,7 +308,8 @@ document.body.onclick = async e => {
   try {
     if (t.classList.contains('ov') || t.dataset.close !== undefined) closeModal();
     else if (t.dataset.t) { tab = t.dataset.t; render(); }
-    else if (t.id == 'st') await staff();
+    else if (t.id == 'st') openModal('pin');
+    else if (t.id == 'pok') await submitPin();
     else if (t.dataset.vw) { vw = t.dataset.vw; render(); }
     else if (t.dataset.mo) { const d = new Date(mon.y, mon.m + Number(t.dataset.mo), 1); mon = {y: d.getFullYear(), m: d.getMonth()}; render(); }
     else if (t.dataset.m) openModal(t.dataset.m);
@@ -339,6 +347,6 @@ onSnapshot(col('giocatori'), s => { D.players = s.docs.map(d => d.data()).sort((
 onSnapshot(col('eventi'), s => { D.extras = s.docs.map(d => ({id: d.id, ...d.data()})); render(); }, fail);
 onSnapshot(col('modifiche'), s => { D.mods = {}; s.docs.forEach(d => { D.mods[d.id] = d.data(); }); render(); }, fail);
 onSnapshot(col('assenze'), s => { D.abs = s.docs.map(d => d.data()); render(); }, fail);
-const pin0 = store.get('pin');
-if (pin0) getDoc(ref('config', 'staff')).then(s => { if (s.exists() && s.data().pin === pin0) { admin = true; tab = 'adm'; render(); } }).catch(() => {});
+onSnapshot(ref('config', 'staff'), s => { cfg = s.exists() ? s.data() : false; checkAuto(); }, () => {});
+document.body.onkeydown = e => { if (e.key == 'Enter' && e.target.id == 'pin') submitPin(); };
 </script></body></html>

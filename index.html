@@ -13,30 +13,50 @@
 body{font-family:system-ui,sans-serif;max-width:560px;margin:0 auto;padding:12px;background:#f4f4f4;color:#222}
 h1{font-size:1.25rem}h3{margin:16px 0 4px}
 select,input,button{font:inherit;padding:9px;border-radius:8px;border:1px solid #bbb;box-sizing:border-box;margin:2px 0}
-select,input:not([type=date]){width:100%}
+select,input:not([type=date]):not([type=file]){width:100%}
 button{background:#fff;cursor:pointer}button:disabled{opacity:.5}
 .card{background:#fff;border-radius:10px;padding:10px;margin:8px 0;border-left:7px solid #aaa}
 .card.ROSSA{border-color:#c0392b}.card.BIANCA{border-color:#bbb}
 .card.ass{background:#fdecea}
+small{color:#666}
 </style></head><body>
 <div id="app">Caricamento…</div>
-<script>
-// ===== CONFIGURAZIONE =====
-const API = 'https://script.google.com/macros/s/AKfycbzYwuBMTSZ-bw6NNME_lq4X6dWG_px1D8mHEgMFUILXgwSB7TaAEiTZ0SDHLrfWeBChWw/exec';   // URL ottenuto da Apps Script
-const INIZIO = '2026-09-01';              // inizio stagione (per il report)
-// ==========================
+<script type="module">
+import {initializeApp} from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
+import {getFirestore, collection, doc, setDoc, addDoc, deleteDoc, getDoc, onSnapshot, writeBatch} from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+
+// ===== CONFIGURAZIONE: incolla qui i dati del tuo progetto Firebase =====
+const FB = {
+  apiKey: "AIzaSyBkIw4tdL9Lz8Rr1_kr7XzzVy1IQOs2ZCw",
+  authDomain: "gestione-assenze-e87d7.firebaseapp.com",
+  projectId: "gestione-assenze-e87d7",
+  storageBucket: "gestione-assenze-e87d7.firebasestorage.app",
+  messagingSenderId: "531728262014",
+  appId: "1:531728262014:web:30f6d602c16dcb25a0092f"
+};
+const INIZIO = '2026-09-01';   // inizio stagione (per il report)
+// ========================================================================
+
 const $ = s => document.querySelector(s);
+const root = $('#app');
 const Q = new URLSearchParams(location.search);
 if (Q.get('c')) localStorage.c = Q.get('c');
 const code = localStorage.c || '';
-let D = null, me = localStorage.me || '', month = false, tab = 'ev';
+if (!FB.projectId) { root.textContent = 'Configurazione Firebase mancante nel file index.html.'; throw 0; }
+if (!code) { root.textContent = 'Usa il link ricevuto dalla società (quello con ?c=...).'; throw 0; }
+
+const db = getFirestore(initializeApp(FB));
+const col = n => collection(db, 's', code, n);
+const ref = (n, id) => doc(db, 's', code, n, id);
+const D = {players: [], extras: [], abs: []};
+let me = localStorage.me || '', month = false, tab = 'ev', admin = false;
+
 const GG = ['dom','lun','mar','mer','gio','ven','sab'];
 const iso = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const api = async o => (await fetch(API + '?' + new URLSearchParams({...o, c: code}))).json();
-const nome = n => (D.players.find(x => x[0] == n) || [])[1] || '?';
-const squadra = n => (D.players.find(x => x[0] == n) || [])[2];
-const ab = (ev, p) => D.abs.find(r => r[0] == ev && r[1] == p);
+const nome = n => (D.players.find(x => x.n == n) || {}).nome || '?';
+const squadra = n => (D.players.find(x => x.n == n) || {}).squadra;
+const ab = (ev, p) => D.abs.find(r => r.ev == ev && r.p == p);
 
 // Calendario fisso: martedì entrambe 18-20, giovedì Bianca 18:30-20, venerdì Rossa 18-19:30, sabato partita
 function recurring(from, to, team) {
@@ -53,7 +73,7 @@ function recurring(from, to, team) {
 }
 function evs(team, a, b) {
   const A = iso(a), B = iso(b), r = recurring(a, b, team);
-  D.extras.forEach(x => { if (x[1] >= A && x[1] <= B && (x[3] == 'TUTTE' || x[3] == team)) r.push({id: x[0], date: x[1], time: x[2], team, k: x[4], title: x[5]}); });
+  D.extras.forEach(x => { if (x.date >= A && x.date <= B && (x.team == 'TUTTE' || x.team == team)) r.push({id: x.id, date: x.date, time: x.time || '', team, k: x.k, title: x.title, x: 1}); });
   return r.sort((p, q) => (p.date + p.time).localeCompare(q.date + q.time));
 }
 function range() {
@@ -70,82 +90,99 @@ function parentView(a, b) {
   evs(t, a, b).forEach(e => {
     const x = ab(e.id, me);
     h += `<div class="card ${t} ${x ? 'ass' : ''}"><b>${dl(e)}</b> ${esc(e.time)} · ${esc(e.title)}${x ? ' — <b>ASSENTE</b>' : ''}<br>
-      <input class="nt" maxlength="200" placeholder="Motivo / note (facoltativo)" value="${esc(x ? x[2] : '')}">
+      <input class="nt" maxlength="200" placeholder="Motivo / note (facoltativo)" value="${esc(x ? x.note : '')}">
       ${x ? `<button data-ev="${e.id}" data-st="A">Aggiorna nota</button> <button data-ev="${e.id}" data-st="OK">Sarà presente</button>`
           : `<button data-ev="${e.id}" data-st="A">Segnala assenza</button>`}</div>`;
   });
   return h;
 }
 function adminView(a, b) {
-  let h = `<h3>Assenti ${month ? 'del mese' : 'della settimana'}</h3><button id="mm">${month ? 'Solo settimana' : 'Tutto il mese'}</button> <button id="rf">↻ Aggiorna</button>`;
+  let h = `<h3>Assenti ${month ? 'del mese' : 'della settimana'}</h3><button id="mm">${month ? 'Solo settimana' : 'Tutto il mese'}</button> <small>aggiornamento in tempo reale</small>`;
   ['BIANCA', 'ROSSA'].forEach(t => evs(t, a, b).forEach(e => {
-    const as = D.abs.filter(r => r[0] == e.id && squadra(r[1]) == t);
-    h += `<div class="card ${t}"><b>${t} · ${dl(e)}</b> ${esc(e.time)} ${esc(e.title)}<br><b>${as.length} assenti su ${D.players.filter(p => p[2] == t).length}</b><br>${as.length ? as.map(r => esc(nome(r[1])) + (r[2] ? ' (' + esc(r[2]) + ')' : '')).join('; ') : 'nessuna assenza'}</div>`;
+    const as = D.abs.filter(r => r.ev == e.id && squadra(r.p) == t);
+    h += `<div class="card ${t}"><b>${t} · ${dl(e)}</b> ${esc(e.time)} ${esc(e.title)}${e.x ? ` <button data-del="${e.id}">Elimina</button>` : ''}<br>
+      <b>${as.length} assenti su ${D.players.filter(p => p.squadra == t).length}</b><br>
+      ${as.length ? as.map(r => esc(nome(r.p)) + (r.note ? ' (' + esc(r.note) + ')' : '')).join('; ') : 'nessuna assenza'}</div>`;
   }));
   h += `<h3>Aggiungi evento extra</h3><div class="card"><input type="date" id="ed"> <input id="et" placeholder="Orario (es. 10:00–12:00)">
     <select id="etm"><option>TUTTE</option><option>BIANCA</option><option>ROSSA</option></select>
     <select id="ek"><option value="A">Allenamento / altro</option><option value="P">Partita</option></select>
     <input id="eti" maxlength="80" placeholder="Titolo (es. Partita domenica vs …)"><button id="ea">Aggiungi</button></div>
-    <h3>Report</h3><button id="rp">⬇ Scarica report presenze (CSV per Excel)</button>`;
+    <h3>Report</h3><button id="rp">⬇ Scarica report presenze (CSV per Excel)</button>
+    <h3>Elenco giocatori</h3><small>${D.players.length} giocatori caricati. Per caricarli o aggiornarli scegli il file giocatori.csv:</small><br><input type="file" id="csv" accept=".csv,text/csv,text/plain">`;
   return h;
 }
 function render() {
+  if (document.activeElement && document.activeElement.classList.contains('nt')) return; // non cancellare la nota mentre la scrivono
   const [a, b] = range();
   let h = `<h1>⚽ Esordienti 2015 – presenze</h1><select id="pl"><option value="">Scegli il giocatore…</option>` +
-    D.players.map(p => `<option value="${p[0]}" ${p[0] == me ? 'selected' : ''}>${esc(p[1])}</option>`).join('') + `</select>`;
-  if (D.admin) h += `<p><button data-t="ev">Vista genitore</button> <button data-t="adm">Vista dirigente</button></p>`;
-  if (D.admin && tab == 'adm') h += adminView(a, b); else if (me) h += parentView(a, b);
-  $('#app').innerHTML = h;
+    D.players.map(p => `<option value="${p.n}" ${p.n == me ? 'selected' : ''}>${esc(p.nome)}</option>`).join('') + `</select>`;
+  h += admin ? `<p><button data-t="ev">Vista genitore</button> <button data-t="adm">Vista staff</button></p>` : `<p><button id="st">Area staff</button></p>`;
+  if (!D.players.length && !admin) h += '<p>Elenco giocatori non ancora caricato.</p>';
+  if (admin && tab == 'adm') h += adminView(a, b); else if (me && squadra(me)) h += parentView(a, b);
+  root.innerHTML = h;
 }
 function report() {
   const today = new Date(); today.setHours(0,0,0,0);
   let csv = '\ufeffGiocatore;Squadra;Allenamenti;Assenze allenamenti;Partite;Assenze partite;% presenza\n';
   D.players.forEach(p => {
-    const ev = evs(p[2], new Date(INIZIO), today); let ta = 0, aa = 0, tp = 0, ap = 0;
-    ev.forEach(e => { const x = ab(e.id, p[0]) ? 1 : 0; if (e.k == 'P') { tp++; ap += x; } else { ta++; aa += x; } });
+    const ev = evs(p.squadra, new Date(INIZIO), today); let ta = 0, aa = 0, tp = 0, ap = 0;
+    ev.forEach(e => { const x = ab(e.id, p.n) ? 1 : 0; if (e.k == 'P') { tp++; ap += x; } else { ta++; aa += x; } });
     const tot = ta + tp, pct = tot ? Math.round(100 * (tot - aa - ap) / tot) : '';
-    csv += `"${p[1]}";${p[2]};${ta};${aa};${tp};${ap};${pct}\n`;
+    csv += `"${p.nome}";${p.squadra};${ta};${aa};${tp};${ap};${pct}\n`;
   });
   const l = document.createElement('a');
   l.href = URL.createObjectURL(new Blob([csv], {type: 'text/csv'}));
   l.download = 'report_presenze_' + iso(today) + '.csv'; l.click();
 }
+async function staff() {
+  const r = ref('config', 'staff'), s = await getDoc(r); let pin;
+  if (!s.exists()) {
+    pin = prompt('Prima volta: scegli un PIN per l\'area staff (almeno 4 caratteri)');
+    if (!pin || pin.length < 4) return;
+    await setDoc(r, {pin});
+  } else {
+    pin = prompt('PIN area staff');
+    if (pin !== s.data().pin) { if (pin !== null) alert('PIN errato'); return; }
+  }
+  localStorage.pin = pin; admin = true; tab = 'adm'; render();
+}
 
-$('#app').onchange = e => { if (e.target.id == 'pl') { me = e.target.value; localStorage.me = me; render(); } };
-$('#app').onclick = async e => {
-  const t = e.target;
-  if (t.dataset.t) { tab = t.dataset.t; render(); }
-  else if (t.id == 'mm') { month = !month; render(); }
-  else if (t.id == 'rp') report();
-  else if (t.id == 'rf') { t.disabled = true; await reload(); }
-  else if (t.dataset.ev) {
-    t.disabled = true;
-    const note = t.parentElement.querySelector('.nt').value.trim(), st = t.dataset.st, ev = t.dataset.ev;
-    try {
-      const r = await api({action: 'set', ev, p: me, st, note});
-      if (!r.ok) throw 0;
-      D.abs = D.abs.filter(x => !(x[0] == ev && x[1] == me));
-      if (st == 'A') D.abs.push([ev, me, note, '']);
-    } catch (_) { alert('Errore di connessione, riprova.'); }
-    render();
-  } else if (t.id == 'ea') {
-    const o = {date: $('#ed').value, time: $('#et').value, team: $('#etm').value, k: $('#ek').value, title: $('#eti').value.trim()};
-    if (!o.date || !o.title) return alert('Servono almeno data e titolo.');
-    const r = await api({action: 'add', ...o});
-    if (r.ok) { D.extras.push([r.id, o.date, o.time, o.team, o.k, o.title]); render(); } else alert('Errore, riprova.');
+root.onchange = async e => {
+  if (e.target.id == 'pl') { me = e.target.value; localStorage.me = me; render(); }
+  else if (e.target.id == 'csv' && e.target.files[0]) {
+    const righe = (await e.target.files[0].text()).split(/\r?\n/).map(l => l.split(';')).map(c => ({n: Number(c[0]), nome: (c[1] || '').trim().replace(/^"|"$/g, ''), squadra: (c[2] || '').trim().toUpperCase()}))
+      .filter(r => r.n > 0 && r.nome && (r.squadra == 'BIANCA' || r.squadra == 'ROSSA'));
+    if (!righe.length) return alert('Nessun giocatore valido nel file (formato: n;nome;squadra).');
+    const wb = writeBatch(db); righe.forEach(r => wb.set(ref('giocatori', String(r.n)), r)); await wb.commit();
+    alert(righe.length + ' giocatori caricati.');
   }
 };
-async function reload() {
-  try { const d = await api({action: 'init'}); if (!d.error) { D = d; render(); } } catch (_) {}
-}
-// la vista dirigente si aggiorna da sola ogni 30 secondi (non quella dei genitori, per non cancellare le note che stanno scrivendo)
-setInterval(() => { if (D && D.admin && tab == 'adm' && !document.hidden) reload(); }, 30000);
-(async () => {
+root.onclick = async e => {
+  const t = e.target;
   try {
-    D = await api({action: 'init'});
-    if (D.error) { $('#app').innerHTML = '<p>Codice non valido: usa il link ricevuto dalla società.</p>'; return; }
-    if (D.admin) tab = 'adm';
-    render();
-  } catch (_) { $('#app').innerHTML = '<p>Impossibile caricare i dati. Riprova più tardi.</p>'; }
-})();
+    if (t.dataset.t) { tab = t.dataset.t; render(); }
+    else if (t.id == 'mm') { month = !month; render(); }
+    else if (t.id == 'rp') report();
+    else if (t.id == 'st') await staff();
+    else if (t.dataset.del) { if (confirm('Eliminare questo evento?')) await deleteDoc(ref('eventi', t.dataset.del)); }
+    else if (t.dataset.ev) {
+      t.disabled = true;
+      const note = t.parentElement.querySelector('.nt').value.trim(), ev = t.dataset.ev, id = ev + '__' + me;
+      if (t.dataset.st == 'A') await setDoc(ref('assenze', id), {ev, p: Number(me), note, ts: Date.now()});
+      else await deleteDoc(ref('assenze', id));
+      render();
+    } else if (t.id == 'ea') {
+      const o = {date: $('#ed').value, time: $('#et').value, team: $('#etm').value, k: $('#ek').value, title: $('#eti').value.trim()};
+      if (!o.date || !o.title) return alert('Servono almeno data e titolo.');
+      await addDoc(col('eventi'), o);
+    }
+  } catch (err) { alert('Errore: ' + (err.message || err)); render(); }
+};
+
+const fail = () => { root.textContent = 'Impossibile caricare i dati. Controlla la connessione e il link.'; };
+onSnapshot(col('giocatori'), s => { D.players = s.docs.map(d => d.data()).sort((a, b) => a.nome.localeCompare(b.nome)); render(); }, fail);
+onSnapshot(col('eventi'), s => { D.extras = s.docs.map(d => ({id: d.id, ...d.data()})); render(); }, fail);
+onSnapshot(col('assenze'), s => { D.abs = s.docs.map(d => d.data()); render(); }, fail);
+if (localStorage.pin) getDoc(ref('config', 'staff')).then(s => { if (s.exists() && s.data().pin === localStorage.pin) { admin = true; tab = 'adm'; render(); } }).catch(() => {});
 </script></body></html>

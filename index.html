@@ -287,7 +287,7 @@ async function staff() {
 }
 
 document.body.onchange = async e => {
-  if (e.target.id == 'pl') { me = e.target.value; store.set('me', me); render(); }
+  if (e.target.id == 'pl') { me = e.target.value; store.set('me', me); e.target.blur(); render(); }
   else if (e.target.id == 'csv' && e.target.files[0]) {
     const righe = (await e.target.files[0].text()).split(/\r?\n/).map(l => l.split(';')).map(c => ({n: Number(c[0]), nome: (c[1] || '').trim().replace(/^"|"$/g, ''), squadra: (c[2] || '').trim().toUpperCase()}))
       .filter(r => r.n > 0 && r.nome && (r.squadra == 'BIANCA' || r.squadra == 'ROSSA'));

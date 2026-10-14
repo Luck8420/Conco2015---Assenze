@@ -1,7 +1,7 @@
 {
-  "name": "Presenze Esordienti 2015",
-  "short_name": "Presenze",
-  "description": "Presenze e assenze Esordienti U12 (2015)",
+  "name": "Concorezzese – Gestione assenze",
+  "short_name": "Assenze",
+  "description": "Gestione assenze Esordienti U12 2015",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#c71525",

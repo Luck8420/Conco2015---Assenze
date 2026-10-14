@@ -1,14 +1,14 @@
 <!doctype html>
 <html lang="it"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Concorezzese – Presenze Esordienti 2015</title>
+<title>Concorezzese – Gestione assenze</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" type="image/png" href="icon-192.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="theme-color" content="#c71525">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Presenze">
+<meta name="apple-mobile-web-app-title" content="Assenze">
 <style>
 /* ===== COLORI DELLA SOCIETÀ: cambia solo questi valori ===== */
 :root{--c1:#c71525;--c2:#8f0e1a;--bianca:#d9d9d9;--rossa:#c71525;--bg:#f5f2ee;--ink:#222}
@@ -17,9 +17,12 @@
 body{margin:0;font-family:system-ui,sans-serif;background:var(--bg);color:var(--ink)}
 header{background:linear-gradient(90deg,var(--c1),var(--c2));color:#fff;display:flex;align-items:center;gap:10px;padding:10px 12px;position:sticky;top:0;z-index:5}
 header img{height:54px;background:#fff;border-radius:10px;padding:3px 5px}
-header h1{font-size:1.05rem;margin:0;flex:1;line-height:1.2}
-header small{display:block;opacity:.85;font-weight:400;font-size:.8rem}
-header button{padding:6px 10px;border-color:#fff7}
+header h1{margin:0;flex:1;line-height:1.15;min-width:0;text-shadow:0 1px 2px #0004}
+.t1{display:block;font-size:clamp(1.15rem,5.6vw,1.6rem);font-weight:800;letter-spacing:.4px;text-transform:uppercase}
+.t2{display:block;font-size:clamp(.9rem,4vw,1.05rem);font-weight:700;margin-top:2px}
+.t3{display:block;font-size:.72rem;font-weight:600;letter-spacing:2px;text-transform:uppercase;opacity:.92;margin-top:2px}
+#hr{display:flex;flex-direction:column;gap:5px}
+header button{padding:6px 12px;border-color:#fff7}
 main{max-width:900px;margin:0 auto;padding:12px}
 button,select,input{font:inherit;padding:8px 10px;border-radius:8px;border:1px solid #bbb;background:#fff;color:var(--ink)}
 button{cursor:pointer}button:disabled{opacity:.5}
@@ -42,7 +45,6 @@ select{width:100%}
 .cd.b{background:var(--bianca)}.cd.r{background:var(--rossa);color:#fff}
 .cd.both{background:linear-gradient(135deg,var(--bianca) 50%,var(--rossa) 50%)}
 .cd.today{outline:2px solid #111}.cd.sel{box-shadow:0 0 0 3px var(--c1)}
-.x{position:absolute;right:5px;bottom:3px}
 .leg{font-size:.85rem;color:#555}.sw{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:middle;margin:0 3px 0 8px}
 .card{background:#fff;border-radius:10px;padding:10px;margin:8px 0;border-left:7px solid #999}
 .card.ROSSA{border-color:var(--rossa)}.card.ass{background:#fdecea}
@@ -55,9 +57,22 @@ select{width:100%}
 .mb input,.mb select{width:100%;margin:3px 0}
 .mb h3,main h3{margin:4px 0 8px;text-transform:capitalize}
 small{color:#666}
+.sel-box{background:#fff;border-radius:12px;padding:10px;margin-bottom:6px}
+.lab{display:flex;align-items:center;gap:8px;font-weight:700;margin-bottom:6px;color:var(--c1)}
+.lab svg{width:34px;height:34px;fill:var(--c1)}
+.okm{display:block;margin-top:4px;color:#2e7d32}
+.pgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.ev{background:#fff;border-radius:12px;padding:10px;cursor:pointer;border-left:7px solid #999;min-height:104px}
+.ev.ROSSA{border-color:var(--rossa)}.ev.ass{background:#fdecea}
+.ev .dh{margin-bottom:4px}
+.abs{display:flex;align-items:center;gap:6px;margin-top:8px;font-weight:700;color:var(--c1)}
+.ico{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:50%;background:var(--c1);color:#fff;font-size:15px;line-height:1}
+.big{position:absolute;right:3px;bottom:3px;width:60%;height:60%;border-radius:50%;background:#fff;color:var(--c1);display:grid;place-items:center;font-size:clamp(16px,6.5vw,30px);font-weight:800;box-shadow:0 1px 4px #0005}
+.canc{text-decoration:line-through;opacity:.6}
+.tag{display:inline-block;background:#555;color:#fff;border-radius:6px;padding:0 6px;font-size:.75rem;margin-left:4px}
 </style></head><body>
 <header><img id="logo" src="stemma.png" alt="" onerror="this.remove()">
-<h1>Concorezzese<small>Esordienti 2015 · presenze</small></h1><div id="hr"></div></header>
+<h1><span class="t1">Concorezzese</span><span class="t2">Esordienti U12 · 2015</span><span class="t3">Gestione assenze</span></h1><div id="hr"></div></header>
 <main id="main">Caricamento…</main>
 <div id="modal"></div>
 <script type="module">
@@ -76,17 +91,24 @@ const INIZIO = '2026-09-01';   // inizio stagione (per il report)
 
 const $ = s => document.querySelector(s);
 const main = $('#main'), mod = $('#modal');
+const store = {   // salva sul telefono in due modi (memoria del browser + cookie di 1 anno)
+  get(k) { try { const v = localStorage.getItem(k); if (v !== null) return v; } catch (_) {} const m = document.cookie.match(new RegExp('(?:^|; )' + k + '=([^;]*)')); return m ? decodeURIComponent(m[1]) : ''; },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (_) {} document.cookie = k + '=' + encodeURIComponent(v) + ';max-age=31536000;path=' + location.pathname.replace(/[^/]*$/, '') + ';SameSite=Lax'; }
+};
+if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
 const Q = new URLSearchParams(location.search);
-if (Q.get('c')) localStorage.c = Q.get('c');
-const code = localStorage.c || '';
+if (Q.get('c')) store.set('c', Q.get('c'));
+const code = store.get('c');
 if (!code) { main.textContent = 'Usa il link ricevuto dalla società (quello con ?c=...).'; throw 0; }
 
 const db = getFirestore(initializeApp(FB));
 const col = n => collection(db, 's', code, n);
 const ref = (n, id) => doc(db, 's', code, n, id);
-const D = {players: [], extras: [], abs: []};
+const D = {players: [], extras: [], abs: [], mods: {}};
+const TIPI = ['Allenamento', 'Campionato', 'Amichevole', 'Torneo'];
+const kOf = t => t == 'Allenamento' ? 'A' : 'P';
 const now0 = new Date();
-let me = localStorage.me || '', vw = 'w', mon = {y: now0.getFullYear(), m: now0.getMonth()}, tab = 'ev', admin = false, sel = null, selN = null;
+let me = store.get('me'), vw = 'w', mon = {y: now0.getFullYear(), m: now0.getMonth()}, tab = 'ev', admin = false, sel = null, selN = null;
 
 const GG = ['dom','lun','mar','mer','gio','ven','sab'];
 const MESI = ['gennaio','febbraio','marzo','aprile','maggio','giugno','luglio','agosto','settembre','ottobre','novembre','dicembre'];
@@ -95,6 +117,7 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;
 const nome = n => (D.players.find(x => x.n == n) || {}).nome || '?';
 const squadra = n => (D.players.find(x => x.n == n) || {}).squadra;
 const tot = t => D.players.filter(p => p.squadra == t).length;
+const ttl = e => esc(e.title) + (e.desc ? ' · ' + esc(e.desc) : '');
 const ab = (ev, p) => D.abs.find(r => r.ev == ev && r.p == p);
 const staffView = () => admin && tab == 'adm';
 const dl = d => { const x = new Date(d + 'T12:00'); return GG[x.getDay()] + ' ' + x.getDate() + '/' + (x.getMonth() + 1); };
@@ -108,13 +131,19 @@ function recurring(from, to, team) {
     if (w == 4 && team == 'BIANCA') t = '18:30–20:00';
     if (w == 5 && team == 'ROSSA') t = '18:00–19:30';
     if (w == 6) { t = ''; k = 'P'; }
-    if (t !== null) r.push({id: s + '_' + team[0] + '_' + k, date: s, time: t, team, k, title: k == 'P' ? 'Partita' : 'Allenamento'});
+    if (t !== null) r.push({id: s + '_' + team[0] + '_' + k, date: s, time: t, team, k, title: k == 'P' ? 'Campionato' : 'Allenamento', pre: 1});
   }
   return r;
 }
-function evs(team, a, b) {
-  const A = iso(a), B = iso(b), r = recurring(a, b, team);
-  D.extras.forEach(x => { if (x.date >= A && x.date <= B && (x.team == 'TUTTE' || x.team == team)) r.push({id: x.id, date: x.date, time: x.time || '', team, k: x.k, title: x.title, x: 1}); });
+function evs(team, a, b, wc) {   // wc = mostra anche gli eventi annullati (solo staff)
+  const A = iso(a), B = iso(b), r = [];
+  ['BIANCA', 'ROSSA'].forEach(t => recurring(a, b, t).forEach(e => {
+    const o = D.mods[e.id];
+    if (o) { if (o.time !== undefined) e.time = o.time; if (o.title) e.title = o.title; if (o.team) e.team = o.team; e.desc = o.desc || ''; if (o.cancel) e.canc = 1; }
+    e.k = kOf(e.title);
+    if (e.team == team && (!e.canc || wc)) r.push(e);
+  }));
+  D.extras.forEach(x => { if (x.date >= A && x.date <= B && (x.team == 'TUTTE' || x.team == team)) r.push({id: x.id, date: x.date, time: x.time || '', team, tm: x.team, k: x.k || kOf(x.title), title: x.title, desc: x.desc || '', x: 1}); });
   return r.sort((p, q) => (p.date + p.time).localeCompare(q.date + q.time));
 }
 function range() {
@@ -125,21 +154,25 @@ function range() {
 // data -> {BIANCA:[eventi], ROSSA:[eventi]}   (Bianca sempre sopra, Rossa sotto)
 function dayMap(a, b) {
   const m = {}, teams = staffView() ? ['BIANCA', 'ROSSA'] : [squadra(me)];
-  teams.forEach(t => evs(t, a, b).forEach(e => { (m[e.date] ??= {BIANCA: [], ROSSA: []})[t].push(e); }));
+  teams.forEach(t => evs(t, a, b, staffView()).forEach(e => { (m[e.date] ??= {BIANCA: [], ROSSA: []})[t].push(e); }));
   return m;
 }
 
 function block(e, t, sv) {
-  const head = `<b>${esc(e.time) || '—'}</b><br>${esc(e.title)}`;
+  const head = `<span class="${e.canc ? 'canc' : ''}"><b>${esc(e.time) || '—'}</b><br>${ttl(e)}</span>${e.canc ? '<span class="tag">ANNULLATO</span>' : ''}`;
   if (sv) {
     const n = D.abs.filter(r => r.ev == e.id && squadra(r.p) == t).length;
     return `<div class="blk ${t}"><b>${t == 'BIANCA' ? 'Bianca' : 'Rossa'}</b> · ${head}<br><span class="${n ? 'bad' : ''}">${n} assenti su ${tot(t)}</span></div>`;
   }
-  return `<div class="blk ${t}">${head}${ab(e.id, me) ? '<br><span class="bad">ASSENTE</span>' : ''}</div>`;
+  return `<div class="blk ${t}">${head}</div>`;
 }
 function weekHTML(m) {
   const ds = Object.keys(m).sort(), sv = staffView(), td = iso(new Date());
   if (!ds.length) return '<p>Nessun evento questa settimana.</p>';
+  if (!sv) return '<div class="pgrid">' + ds.flatMap(d => m[d][squadra(me)]).map(e => {
+    const x = ab(e.id, me);
+    return `<div class="ev ${e.team}${x ? ' ass' : ''}" data-day="${e.date}"><div class="dh">${dl(e.date)}</div><b>${esc(e.time) || '—'}</b><br>${ttl(e)}${x ? '<div class="abs"><span class="ico">✖</span> Assente</div>' : ''}</div>`;
+  }).join('') + '</div>';
   return '<div class="strip">' + ds.map(d => `<div class="col${sv && d == sel ? ' sel' : ''}${d == td ? ' today' : ''}" data-day="${d}"><div class="dh">${dl(d)}</div>` +
     ['BIANCA', 'ROSSA'].map(t => m[d][t].map(e => block(e, t, sv)).join('')).join('') + '</div>').join('') + '</div>';
 }
@@ -151,32 +184,33 @@ function monthHTML(m) {
     const s = iso(new Date(mon.y, mon.m, d)), ev = m[s]; let c = 'cd', x = '';
     if (ev) {
       const b = ev.BIANCA.length, r = ev.ROSSA.length; c += b && r ? ' both' : r ? ' r' : ' b';
-      if (!sv && ev.BIANCA.concat(ev.ROSSA).some(e => ab(e.id, me))) x = '<span class="x">✖</span>';
+      if (!sv && ev.BIANCA.concat(ev.ROSSA).some(e => ab(e.id, me))) x = '<span class="big">✖</span>';
     }
     h += `<div class="${c}${s == td ? ' today' : ''}${sv && s == sel ? ' sel' : ''}"${ev ? ` data-day="${s}"` : ''}>${d}${x}</div>`;
   }
   const leg = staffView() ? `<span class="sw" style="background:var(--bianca)"></span>Bianca <span class="sw" style="background:var(--rossa)"></span>Rossa`
-    : `<span class="sw" style="background:var(--${squadra(me) == 'ROSSA' ? 'rossa' : 'bianca'})"></span>giorno con allenamento o partita · ✖ = assente`;
+    : `<span class="sw" style="background:var(--${squadra(me) == 'ROSSA' ? 'rossa' : 'bianca'})"></span>giorno con evento · ✖ = assente`;
   return h + `</div><p class="leg">${leg}</p>`;
 }
 function detail() {
   if (!sel) return '';
   const d = new Date(sel + 'T12:00'); let h = `<h3>${dl(sel)}</h3>`;
-  ['BIANCA', 'ROSSA'].forEach(t => evs(t, d, d).forEach(e => {
+  ['BIANCA', 'ROSSA'].forEach(t => evs(t, d, d, true).forEach(e => {
     const as = D.abs.filter(r => r.ev == e.id && squadra(r.p) == t).sort((p, q) => nome(p.p).localeCompare(nome(q.p)));
     const open = as.find(r => selN == e.id + '__' + r.p);
-    h += `<div class="card ${t}"><b>${t == 'BIANCA' ? 'Bianca' : 'Rossa'}</b> · ${esc(e.time)} ${esc(e.title)}${e.x ? ` <button data-del="${e.id}">Elimina</button>` : ''}<br>
+    h += `<div class="card ${t}"><b>${t == 'BIANCA' ? 'Bianca' : 'Rossa'}</b> · <span class="${e.canc ? 'canc' : ''}">${esc(e.time)} ${ttl(e)}</span>${e.canc ? '<span class="tag">ANNULLATO</span>' : ''} <button data-edit="${e.id}">Modifica</button>${e.x ? ` <button data-del="${e.id}">Elimina</button>` : ''}<br>
       <b>${as.length} assenti su ${tot(t)}</b><div class="chips">${as.length ? as.map(r => `<button class="chip${open == r ? ' on' : ''}" data-n="${e.id}__${r.p}">${esc(nome(r.p))}</button>`).join('') : 'nessuna assenza'}</div>
       ${open ? `<div class="nota"><b>${esc(nome(open.p))}</b>: ${esc(open.note) || 'nessuna nota'}</div>` : ''}</div>`;
   }));
-  return h;
+  return h + `<p><button data-logout>Esci dall'area staff</button></p>`;
 }
 
 function render() {
   if (document.activeElement && document.activeElement.id == 'pl') return;
   const sv = staffView();
   $('#hr').innerHTML = admin ? `<button class="${!sv ? 'on' : ''}" data-t="ev">Genitore</button> <button class="${sv ? 'on' : ''}" data-t="adm">Staff</button>` : `<button id="st">Staff</button>`;
-  let h = sv ? '' : `<select id="pl"><option value="">Scegli il giocatore…</option>${D.players.map(p => `<option value="${p.n}" ${p.n == me ? 'selected' : ''}>${esc(p.nome)}</option>`).join('')}</select>`;
+  const ICON = '<svg viewBox="0 0 32 32"><circle cx="16" cy="6.5" r="4.5"/><path d="M9 13.5l5-3h4l5 3 2.5 6.5-4 1.5V30H10.5V21.5L6.5 20z"/><circle cx="27" cy="27" r="3.2"/></svg>';
+  let h = sv ? '' : `<div class="sel-box"><div class="lab">${ICON} Seleziona giocatore</div><select id="pl"><option value="">Scegli il giocatore…</option>${D.players.map(p => `<option value="${p.n}" ${p.n == me ? 'selected' : ''}>${esc(p.nome)}</option>`).join('')}</select>${squadra(me) ? '<small class="okm">✓ Ricordato su questo telefono · puoi cambiarlo quando vuoi</small>' : ''}</div>`;
   h += `<div class="row"><div><button class="${vw == 'w' ? 'on' : ''}" data-vw="w">Settimana</button> <button class="${vw == 'm' ? 'on' : ''}" data-vw="m">Mese</button></div>` +
     (sv ? `<div><button class="pri" data-m="add">+ Evento</button> <button data-m="rep">⬇ Report</button> <button data-m="pl">Giocatori</button></div>` : '') + '</div>';
   if (!D.players.length) h += sv ? '<p>Nessun giocatore: caricali con il pulsante "Giocatori".</p>' : '<p>Elenco giocatori non ancora caricato.</p>';
@@ -197,15 +231,26 @@ function openModal(k, d) {
     const dd = new Date(d + 'T12:00'); h = `<h3>${dl(d)}</h3>`;
     evs(squadra(me), dd, dd).forEach(e => {
       const x = ab(e.id, me);
-      h += `<div class="card ${e.team} ${x ? 'ass' : ''}"><b>${esc(e.time) || '—'}</b> · ${esc(e.title)}${x ? ' — <b>ASSENTE</b>' : ''}<br>
+      h += `<div class="card ${e.team} ${x ? 'ass' : ''}"><b>${esc(e.time) || '—'}</b> · ${ttl(e)}${x ? ' — <b>ASSENTE</b>' : ''}<br>
         <input class="nt" maxlength="200" placeholder="Motivo / note (facoltativo)" value="${esc(x ? x.note : '')}">
         ${x ? `<button class="pri" data-ev="${e.id}" data-st="A">Aggiorna nota</button> <button data-ev="${e.id}" data-st="OK">Sarà presente</button>`
             : `<button class="pri" data-ev="${e.id}" data-st="A">Segnala assenza</button>`}</div>`;
     });
-  } else if (k == 'add') h = `<h3>Aggiungi evento extra</h3><input type="date" id="ed"><input id="et" placeholder="Orario (es. 10:00–12:00)">
-    <select id="etm"><option>TUTTE</option><option>BIANCA</option><option>ROSSA</option></select>
-    <select id="ek"><option value="A">Allenamento / altro</option><option value="P">Partita</option></select>
-    <input id="eti" maxlength="80" placeholder="Titolo (es. Partita domenica vs …)"><button class="pri" id="ea">Aggiungi</button>`;
+  } else if (k == 'add') h = `<h3>Aggiungi evento extra</h3><small>Data</small><input type="date" id="ed"><small>Orario</small><input id="et" placeholder="es. 10:00–12:00">
+    <small>Squadra</small><select id="etm"><option>TUTTE</option><option>BIANCA</option><option>ROSSA</option></select>
+    <small>Tipo</small><select id="ek">${TIPI.map(t => `<option>${t}</option>`).join('')}</select>
+    <small>Dettagli (facoltativo, es. avversario)</small><input id="eti" maxlength="80"><button class="pri" id="ea">Aggiungi</button>`;
+  else if (k == 'edit') {
+    const dd = new Date(sel + 'T12:00'), e = ['BIANCA', 'ROSSA'].flatMap(t => evs(t, dd, dd, true)).find(x => x.id == d);
+    if (!e) return;
+    const teams = e.x ? ['TUTTE', 'BIANCA', 'ROSSA'] : ['BIANCA', 'ROSSA'], cur = e.x ? e.tm : e.team, types = TIPI.includes(e.title) ? TIPI : TIPI.concat([e.title]);
+    h = `<h3>Modifica evento · ${dl(e.date)}</h3><small>Orario</small><input id="mt" value="${esc(e.time)}" placeholder="es. 18:00–20:00">
+      <small>Tipo</small><select id="my">${types.map(t => `<option ${t == e.title ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
+      <small>Squadra</small><select id="mq">${teams.map(t => `<option ${t == cur ? 'selected' : ''}>${t}</option>`).join('')}</select>
+      <small>Dettagli (facoltativo, es. avversario)</small><input id="md" maxlength="80" value="${esc(e.desc)}">
+      ${e.x ? '' : `<p><label><input type="checkbox" id="mc" style="width:auto" ${e.canc ? 'checked' : ''}> Evento annullato (i genitori non lo vedono)</label></p>`}
+      <button class="pri" data-save="${e.id}" data-x="${e.x ? 1 : 0}">Salva</button>${e.x ? '' : ` <button data-reset="${e.id}">Ripristina predefinito</button>`}`;
+  }
   else if (k == 'rep') h = `<h3>Report presenze</h3><small>Dal</small><input type="date" id="rf" value="${INIZIO}"><small>Al</small><input type="date" id="rt" value="${iso(new Date())}">
     <button class="pri" id="dr">⬇ Scarica CSV (Excel)</button><p><small>Conta solo gli eventi già trascorsi. Chi non ha segnalato assenza risulta presente.</small></p>`;
   else if (k == 'pl') h = `<h3>Elenco giocatori</h3><p>${D.players.length} giocatori caricati. Per caricarli o aggiornarli scegli il file giocatori.csv:</p><input type="file" id="csv" accept=".csv,text/csv,text/plain">`;
@@ -238,11 +283,11 @@ async function staff() {
     pin = prompt('PIN area staff');
     if (pin !== s.data().pin) { if (pin !== null) alert('PIN errato'); return; }
   }
-  localStorage.pin = pin; admin = true; tab = 'adm'; render();
+  store.set('pin', pin); admin = true; tab = 'adm'; render();
 }
 
 document.body.onchange = async e => {
-  if (e.target.id == 'pl') { me = e.target.value; localStorage.me = me; render(); }
+  if (e.target.id == 'pl') { me = e.target.value; store.set('me', me); render(); }
   else if (e.target.id == 'csv' && e.target.files[0]) {
     const righe = (await e.target.files[0].text()).split(/\r?\n/).map(l => l.split(';')).map(c => ({n: Number(c[0]), nome: (c[1] || '').trim().replace(/^"|"$/g, ''), squadra: (c[2] || '').trim().toUpperCase()}))
       .filter(r => r.n > 0 && r.nome && (r.squadra == 'BIANCA' || r.squadra == 'ROSSA'));
@@ -261,6 +306,15 @@ document.body.onclick = async e => {
     else if (t.dataset.mo) { const d = new Date(mon.y, mon.m + Number(t.dataset.mo), 1); mon = {y: d.getFullYear(), m: d.getMonth()}; render(); }
     else if (t.dataset.m) openModal(t.dataset.m);
     else if (t.dataset.n) { selN = selN == t.dataset.n ? null : t.dataset.n; render(); }
+    else if (t.dataset.edit) openModal('edit', t.dataset.edit);
+    else if (t.dataset.logout !== undefined) { store.set('pin', ''); admin = false; tab = 'ev'; render(); }
+    else if (t.dataset.save) {
+      const id = t.dataset.save, o = {time: $('#mt').value.trim(), title: $('#my').value, team: $('#mq').value, desc: $('#md').value.trim()};
+      if (t.dataset.x == '1') await setDoc(ref('eventi', id), {...o, k: kOf(o.title)}, {merge: true});
+      else await setDoc(ref('modifiche', id), {...o, cancel: $('#mc').checked});
+      closeModal();
+    }
+    else if (t.dataset.reset) { await deleteDoc(ref('modifiche', t.dataset.reset)); closeModal(); }
     else if (t.dataset.del) { if (confirm('Eliminare questo evento?')) await deleteDoc(ref('eventi', t.dataset.del)); }
     else if (t.dataset.ev) {
       t.disabled = true;
@@ -269,8 +323,8 @@ document.body.onclick = async e => {
       else await deleteDoc(ref('assenze', id));
       closeModal(); render();
     } else if (t.id == 'ea') {
-      const o = {date: $('#ed').value, time: $('#et').value, team: $('#etm').value, k: $('#ek').value, title: $('#eti').value.trim()};
-      if (!o.date || !o.title) return alert('Servono almeno data e titolo.');
+      const ty = $('#ek').value, o = {date: $('#ed').value, time: $('#et').value.trim(), team: $('#etm').value, k: kOf(ty), title: ty, desc: $('#eti').value.trim()};
+      if (!o.date) return alert('Scegli la data.');
       await addDoc(col('eventi'), o); closeModal();
     } else if (t.id == 'dr') report($('#rf').value, $('#rt').value);
     else {
@@ -283,6 +337,8 @@ document.body.onclick = async e => {
 const fail = () => { main.textContent = 'Impossibile caricare i dati. Controlla la connessione e il link.'; };
 onSnapshot(col('giocatori'), s => { D.players = s.docs.map(d => d.data()).sort((a, b) => a.nome.localeCompare(b.nome)); render(); }, fail);
 onSnapshot(col('eventi'), s => { D.extras = s.docs.map(d => ({id: d.id, ...d.data()})); render(); }, fail);
+onSnapshot(col('modifiche'), s => { D.mods = {}; s.docs.forEach(d => { D.mods[d.id] = d.data(); }); render(); }, fail);
 onSnapshot(col('assenze'), s => { D.abs = s.docs.map(d => d.data()); render(); }, fail);
-if (localStorage.pin) getDoc(ref('config', 'staff')).then(s => { if (s.exists() && s.data().pin === localStorage.pin) { admin = true; tab = 'adm'; render(); } }).catch(() => {});
+const pin0 = store.get('pin');
+if (pin0) getDoc(ref('config', 'staff')).then(s => { if (s.exists() && s.data().pin === pin0) { admin = true; tab = 'adm'; render(); } }).catch(() => {});
 </script></body></html>

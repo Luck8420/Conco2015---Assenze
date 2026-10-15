@@ -127,7 +127,10 @@ const dmy = x => x.slice(8) + '/' + x.slice(5, 7) + '/' + x.slice(0, 4);
 const TIPI = ['Allenamento', 'Campionato', 'Amichevole', 'Torneo'];
 const kOf = t => t == 'Allenamento' ? 'A' : 'P';
 const now0 = new Date();
-let me = store.get('me'), vw = 'w', wk = 0, mon = {y: now0.getFullYear(), m: now0.getMonth()}, tab = 'ev', admin = false, sel = null, selN = null;
+let me = store.get('me'), tab = 'ev', admin = false, sel = null, selN = null;
+// Navigazione (settimana / mese / vista) separata per la vista genitore e per la vista staff
+const nav = {ev: {vw: 'w', wk: 0, mon: {y: now0.getFullYear(), m: now0.getMonth()}}, adm: {vw: 'w', wk: 0, mon: {y: now0.getFullYear(), m: now0.getMonth()}}};
+const V = () => nav[staffView() ? 'adm' : 'ev'];
 
 const GG = ['dom','lun','mar','mer','gio','ven','sab'];
 const MES3 = ['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic'];
@@ -180,7 +183,7 @@ function evs(team, a, b, wc) {   // wc = mostra anche gli eventi annullati (solo
 }
 function range() {
   const n = new Date(); n.setHours(0,0,0,0);
-  const m = new Date(n); m.setDate(n.getDate() - ((n.getDay() + 6) % 7) + 7 * wk);
+  const m = new Date(n); m.setDate(n.getDate() - ((n.getDay() + 6) % 7) + 7 * V().wk);
   const e = new Date(m); e.setDate(m.getDate() + 6); return [m, e];
 }
 // data -> {BIANCA:[eventi], ROSSA:[eventi]}   (Bianca sempre sopra, Rossa sotto)
@@ -209,20 +212,20 @@ function weekHTML(m) {
     ['BIANCA', 'ROSSA'].map(t => m[d][t].map(e => block(e, t, sv)).join('')).join('') + '</div>').join('') + '</div>';
 }
 function navHTML() {
-  if (vw == 'w') {
+  if (V().vw == 'w') {
     const [x, y] = range(), same = x.getMonth() == y.getMonth();
     const lab = same ? `${x.getDate()}–${y.getDate()} ${MESI[x.getMonth()]} ${y.getFullYear()}` : `${x.getDate()} ${MES3[x.getMonth()]} – ${y.getDate()} ${MES3[y.getMonth()]} ${y.getFullYear()}`;
-    return `<div class="mh"><button data-wk="-1">◀</button><div><b>Settimana ${lab}</b><br><small>${wk == 0 ? 'settimana corrente' : `<button data-cur>↺ torna a questa settimana</button>`}</small></div><button data-wk="1">▶</button></div>`;
+    return `<div class="mh"><button data-wk="-1">◀</button><div><b>Settimana ${lab}</b><br><small>${V().wk == 0 ? 'settimana corrente' : `<button data-cur>↺ torna a questa settimana</button>`}</small></div><button data-wk="1">▶</button></div>`;
   }
-  const cur = mon.y == now0.getFullYear() && mon.m == now0.getMonth();
-  return `<div class="mh"><button data-mo="-1">◀</button><div><b>${MESI[mon.m]} ${mon.y}</b><br><small>${cur ? 'mese corrente' : `<button data-cur>↺ torna a questo mese</button>`}</small></div><button data-mo="1">▶</button></div>`;
+  const cur = V().mon.y == now0.getFullYear() && V().mon.m == now0.getMonth();
+  return `<div class="mh"><button data-mo="-1">◀</button><div><b>${MESI[V().mon.m]} ${V().mon.y}</b><br><small>${cur ? 'mese corrente' : `<button data-cur>↺ torna a questo mese</button>`}</small></div><button data-mo="1">▶</button></div>`;
 }
 function monthHTML(m) {
-  const sv = staffView(), td = iso(new Date()), last = new Date(mon.y, mon.m + 1, 0), lead = (new Date(mon.y, mon.m, 1).getDay() + 6) % 7;
+  const sv = staffView(), td = iso(new Date()), last = new Date(V().mon.y, V().mon.m + 1, 0), lead = (new Date(V().mon.y, V().mon.m, 1).getDay() + 6) % 7;
   let h = `<div class="cal">` +
     ['L','M','M','G','V','S','D'].map(x => `<div class="cw">${x}</div>`).join('') + '<div></div>'.repeat(lead);
   for (let d = 1; d <= last.getDate(); d++) {
-    const s = iso(new Date(mon.y, mon.m, d)), ev = m[s]; let c = 'cd', x = '';
+    const s = iso(new Date(V().mon.y, V().mon.m, d)), ev = m[s]; let c = 'cd', x = '';
     if (ev) {
       const b = ev.BIANCA.length, r = ev.ROSSA.length; c += b && r ? ' both' : r ? ' r' : ' b';
       if (!sv && ev.BIANCA.concat(ev.ROSSA).some(e => ab(e.id, me))) x = '<span class="big">✖</span>';
@@ -255,15 +258,15 @@ function render() {
   $('#hr').innerHTML = admin ? `<button class="${!sv ? 'on' : ''}" data-t="ev">Genitore</button> <button class="${sv ? 'on' : ''}" data-t="adm">Staff</button>` : `<button class="on" data-t="ev">Genitore</button> <button id="st">Staff</button>`;
   const ICON = '<svg viewBox="0 0 32 32"><circle cx="16" cy="6.5" r="4.5"/><path d="M9 13.5l5-3h4l5 3 2.5 6.5-4 1.5V30H10.5V21.5L6.5 20z"/><circle cx="27" cy="27" r="3.2"/></svg>';
   let h = sv ? '' : `<div class="sel-box"><div class="lab">${ICON} Seleziona giocatore</div><select id="pl"><option value="">Scegli il giocatore…</option>${D.players.map(p => `<option value="${p.n}" ${p.n == me ? 'selected' : ''}>${esc(p.nome)}</option>`).join('')}</select>${squadra(me) ? '<small class="okm">✓ Ricordato su questo telefono · puoi cambiarlo quando vuoi</small>' : ''}</div>`;
-  h += `<div class="row"><div><button class="${vw == 'w' ? 'on' : ''}" data-vw="w">Settimana</button> <button class="${vw == 'm' ? 'on' : ''}" data-vw="m">Mese</button></div>` +
+  h += `<div class="row"><div><button class="${V().vw == 'w' ? 'on' : ''}" data-vw="w">Settimana</button> <button class="${V().vw == 'm' ? 'on' : ''}" data-vw="m">Mese</button></div>` +
     (sv ? `<div><button class="pri" data-m="add">+ Evento</button> <button data-m="rep">⬇ Report</button> <button data-m="cal">Calendario</button> <button data-m="pl">Giocatori</button></div>` : '') + '</div>';
   if (!D.players.length) h += sv ? '<p>Nessun giocatore: caricali con il pulsante "Giocatori".</p>' : '<p>Elenco giocatori non ancora caricato.</p>';
   else if (!sv && !squadra(me)) h += '<p>Scegli il giocatore per vedere gli eventi.</p>';
   else {
-    const [a, b] = vw == 'w' ? range() : [new Date(mon.y, mon.m, 1), new Date(mon.y, mon.m + 1, 0)];
+    const [a, b] = V().vw == 'w' ? range() : [new Date(V().mon.y, V().mon.m, 1), new Date(V().mon.y, V().mon.m + 1, 0)];
     const m = dayMap(a, b);
     if (sv && !(sel && m[sel])) { const ds = Object.keys(m).sort(); sel = ds.find(d => d >= iso(new Date())) || ds[0] || null; }
-    h += navHTML() + (vw == 'w' ? weekHTML(m) : monthHTML(m));
+    h += navHTML() + (V().vw == 'w' ? weekHTML(m) : monthHTML(m));
     if (sv) h += detail();
   }
   main.innerHTML = h;
@@ -453,9 +456,9 @@ document.body.onclick = async e => {
     else if (t.dataset.t) { tab = t.dataset.t; render(); }
     else if (t.id == 'st') openModal('pin');
     else if (t.id == 'pok') await submitPin();
-    else if (t.dataset.vw) { vw = t.dataset.vw; render(); }
-    else if (t.dataset.wk) { wk += Number(t.dataset.wk); render(); }
-    else if (t.dataset.cur !== undefined) { wk = 0; mon = {y: now0.getFullYear(), m: now0.getMonth()}; render(); }
+    else if (t.dataset.vw) { V().vw = t.dataset.vw; render(); }
+    else if (t.dataset.wk) { V().wk += Number(t.dataset.wk); render(); }
+    else if (t.dataset.cur !== undefined) { V().wk = 0; V().mon = {y: now0.getFullYear(), m: now0.getMonth()}; render(); }
     else if (t.dataset.tpl !== undefined) templateCsv();
     else if (t.dataset.tplx !== undefined) await templateXlsx();
     else if (t.dataset.radd) { readDraft(); draft.rules[t.dataset.radd].push({d: 1, t: '18:00–20:00', y: 'Allenamento'}); rerenderCal(); }
@@ -477,7 +480,7 @@ document.body.onclick = async e => {
     }
     else if (t.dataset.pdel) { readDraft(); await deleteDoc(ref('pause', t.dataset.pdel)); rerenderCal(); }
     else if (t.dataset.canc) { const id = t.dataset.canc, cur = !!(D.mods[id] && D.mods[id].cancel); await setDoc(ref('modifiche', id), {cancel: !cur}, {merge: true}); }
-    else if (t.dataset.mo) { const d = new Date(mon.y, mon.m + Number(t.dataset.mo), 1); mon = {y: d.getFullYear(), m: d.getMonth()}; render(); }
+    else if (t.dataset.mo) { const d = new Date(V().mon.y, V().mon.m + Number(t.dataset.mo), 1); V().mon = {y: d.getFullYear(), m: d.getMonth()}; render(); }
     else if (t.dataset.m) openModal(t.dataset.m);
     else if (t.dataset.n) { selN = selN == t.dataset.n ? null : t.dataset.n; render(); }
     else if (t.dataset.edit) openModal('edit', t.dataset.edit);

@@ -260,8 +260,8 @@ function openModal(k, d) {
     <small>Squadra</small><select id="etm"><option>TUTTE</option><option>BIANCA</option><option>ROSSA</option></select>
     <small>Tipo</small><select id="ek">${TIPI.map(t => `<option>${t}</option>`).join('')}</select>
     <small>Dettagli (facoltativo, es. avversario)</small><input id="eti" maxlength="80"><button class="pri" id="ea">Aggiungi</button>
-    <hr><p><b>Oppure carica più eventi da file CSV</b><br><small>Colonne: data;orario;squadra;tipo;dettagli</small></p>
-    <input type="file" id="ecsv" accept=".csv,text/csv,text/plain"><p><button data-tpl>⬇ Scarica il modello CSV</button></p>`;
+    <hr><p><b>Oppure carica più eventi da file CSV o Excel</b><br><small>Colonne: data;orario;squadra;tipo;dettagli</small></p>
+    <input type="file" id="ecsv" accept=".csv,.xlsx,.xls,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"><p><button data-tpl>⬇ Modello CSV</button> <button data-tplx>⬇ Modello Excel</button></p>`;
   else if (k == 'edit') {
     const dd = new Date(sel + 'T12:00'), e = ['BIANCA', 'ROSSA'].flatMap(t => evs(t, dd, dd, true)).find(x => x.id == d);
     if (!e) return;
@@ -277,7 +277,7 @@ function openModal(k, d) {
     <input type="password" id="pin" autocomplete="off" placeholder="PIN"><small id="perr" class="bad"></small><br><button class="pri" id="pok">Entra</button>`;
   else if (k == 'rep') h = `<h3>Report presenze</h3><small>Dal</small><input type="date" id="rf" value="${INIZIO}"><small>Al</small><input type="date" id="rt" value="${iso(new Date())}">
     <button class="pri" id="dr">⬇ Scarica CSV (Excel)</button><p><small>Conta solo gli eventi già trascorsi. Chi non ha segnalato assenza risulta presente.</small></p>`;
-  else if (k == 'pl') h = `<h3>Elenco giocatori</h3><p>${D.players.length} giocatori caricati. Per caricarli o aggiornarli scegli il file giocatori.csv:</p><input type="file" id="csv" accept=".csv,text/csv,text/plain">`;
+  else if (k == 'pl') h = `<h3>Elenco giocatori</h3><p>${D.players.length} giocatori caricati. Per caricarli o aggiornarli scegli il file (CSV o Excel) con le colonne n;nome;squadra:</p><input type="file" id="csv" accept=".csv,.xlsx,.xls,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel">`;
   mod.innerHTML = `<div class="ov"><div class="mb"><button data-close style="float:right">✕</button>${h}</div></div>`;
   if (k == 'pin') $('#pin').focus();
 }
@@ -295,16 +295,45 @@ function templateCsv() {
   const l = document.createElement('a');
   l.href = URL.createObjectURL(new Blob([csv], {type: 'text/csv'})); l.download = 'eventi_modello.csv'; l.click();
 }
-async function importEvents(txt) {
-  const lines = txt.replace(/^\ufeff/, '').split(/\r?\n/).filter(l => l.trim());
-  if (!lines.length) return alert('File vuoto.');
-  const sep = lines[0].includes(';') ? ';' : ',', ok = [], bad = [];
-  lines.forEach((l, i) => {
-    const c = l.split(sep).map(x => x.trim().replace(/^"|"$/g, '')), date = parseDate(c[0] || '');
+// ----- lettura file CSV / Excel -----
+const str = c => String(c ?? '').trim().replace(/^"|"$/g, '');
+const pad2 = n => String(n).padStart(2, '0');
+const serialDate = n => { const d = new Date(Date.UTC(1899, 11, 30) + Math.floor(n) * 864e5); return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate()); };
+const serialTime = n => { const m = Math.round((n % 1) * 1440); return pad2(Math.floor(m / 60) % 24) + ':' + pad2(m % 60); };
+let xlsxP;
+const loadXLSX = () => xlsxP || (xlsxP = new Promise((ok, ko) => {
+  if (window.XLSX) return ok(window.XLSX);
+  const sc = document.createElement('script');
+  sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+  sc.onload = () => ok(window.XLSX); sc.onerror = () => { xlsxP = null; ko(new Error('Impossibile caricare il lettore Excel: controlla la connessione.')); };
+  document.head.appendChild(sc);
+}));
+async function readRows(file) {   // righe come liste di celle: da CSV (; o ,) oppure dal primo foglio di un file Excel
+  if (/\.xlsx?$/i.test(file.name)) {
+    const X = await loadXLSX(), wb = X.read(await file.arrayBuffer(), {type: 'array'});
+    return X.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header: 1, raw: true, defval: ''});
+  }
+  const lines = (await file.text()).replace(/^\ufeff/, '').split(/\r?\n/).filter(l => l.trim());
+  const sep = lines[0] && lines[0].includes(';') ? ';' : ',';
+  return lines.map(l => l.split(sep));
+}
+async function templateXlsx() {
+  const X = await loadXLSX(), ws = X.utils.aoa_to_sheet([['data', 'orario', 'squadra', 'tipo', 'dettagli'],
+    ['2026-11-07', '15:00', 'BIANCA', 'Campionato', 'vs Esempio Calcio'], ['2026-11-07', '16:30', 'ROSSA', 'Campionato', 'vs Altra Squadra'],
+    ['2026-11-14', '10:00–12:00', 'TUTTE', 'Torneo', 'Torneo di esempio'], ['2026-11-15', '10:30', 'BIANCA', 'Amichevole', '']]);
+  ws['!cols'] = [{wch: 12}, {wch: 14}, {wch: 10}, {wch: 12}, {wch: 28}];
+  const wb = X.utils.book_new(); X.utils.book_append_sheet(wb, ws, 'Eventi'); X.writeFile(wb, 'eventi_modello.xlsx');
+}
+async function importEvents(rows) {
+  if (!rows.length) return alert('File vuoto.');
+  const ok = [], bad = [];
+  rows.forEach((c, i) => {
+    if (!c.some(x => str(x))) return;   // riga vuota
+    const date = typeof c[0] == 'number' ? serialDate(c[0]) : parseDate(str(c[0]));
     if (!date) { if (i > 0) bad.push(i + 1); return; }   // la prima riga (intestazione) viene saltata
-    const team = (c[2] || '').toUpperCase(), title = TMAP[(c[3] || '').toLowerCase()];
+    const time = typeof c[1] == 'number' ? serialTime(c[1]) : str(c[1]), team = str(c[2]).toUpperCase(), title = TMAP[str(c[3]).toLowerCase()];
     if (!['BIANCA', 'ROSSA', 'TUTTE'].includes(team) || !title) { bad.push(i + 1); return; }
-    ok.push({date, time: c[1] || '', team, k: kOf(title), title, desc: c[4] || ''});
+    ok.push({date, time, team, k: kOf(title), title, desc: str(c[4])});
   });
   if (!ok.length) return alert('Nessun evento valido. Controlla le colonne: data;orario;squadra;tipo;dettagli');
   for (let i = 0; i < ok.length; i += 400) {
@@ -346,13 +375,15 @@ async function submitPin() {
 
 document.body.onchange = async e => {
   if (e.target.id == 'pl') { me = e.target.value; store.set('me', me); e.target.blur(); render(); }
-  else if (e.target.id == 'ecsv' && e.target.files[0]) { try { await importEvents(await e.target.files[0].text()); } catch (err) { alert('Errore: ' + (err.message || err)); } }
+  else if (e.target.id == 'ecsv' && e.target.files[0]) { try { await importEvents(await readRows(e.target.files[0])); } catch (err) { alert('Errore: ' + (err.message || err)); } }
   else if (e.target.id == 'csv' && e.target.files[0]) {
-    const righe = (await e.target.files[0].text()).split(/\r?\n/).map(l => l.split(';')).map(c => ({n: Number(c[0]), nome: (c[1] || '').trim().replace(/^"|"$/g, ''), squadra: (c[2] || '').trim().toUpperCase()}))
-      .filter(r => r.n > 0 && r.nome && (r.squadra == 'BIANCA' || r.squadra == 'ROSSA'));
-    if (!righe.length) return alert('Nessun giocatore valido nel file (formato: n;nome;squadra).');
-    const wb = writeBatch(db); righe.forEach(r => wb.set(ref('giocatori', String(r.n)), r)); await wb.commit();
-    closeModal(); alert(righe.length + ' giocatori caricati.');
+    try {
+      const righe = (await readRows(e.target.files[0])).map(c => ({n: Number(c[0]), nome: str(c[1]), squadra: str(c[2]).toUpperCase()}))
+        .filter(r => r.n > 0 && r.nome && (r.squadra == 'BIANCA' || r.squadra == 'ROSSA'));
+      if (!righe.length) return alert('Nessun giocatore valido nel file (colonne: n;nome;squadra).');
+      const wb = writeBatch(db); righe.forEach(r => wb.set(ref('giocatori', String(r.n)), r)); await wb.commit();
+      closeModal(); alert(righe.length + ' giocatori caricati.');
+    } catch (err) { alert('Errore: ' + (err.message || err)); }
   }
 };
 document.body.onclick = async e => {
@@ -366,6 +397,7 @@ document.body.onclick = async e => {
     else if (t.dataset.wk) { wk += Number(t.dataset.wk); render(); }
     else if (t.dataset.cur !== undefined) { wk = 0; mon = {y: now0.getFullYear(), m: now0.getMonth()}; render(); }
     else if (t.dataset.tpl !== undefined) templateCsv();
+    else if (t.dataset.tplx !== undefined) await templateXlsx();
     else if (t.dataset.mo) { const d = new Date(mon.y, mon.m + Number(t.dataset.mo), 1); mon = {y: d.getFullYear(), m: d.getMonth()}; render(); }
     else if (t.dataset.m) openModal(t.dataset.m);
     else if (t.dataset.n) { selN = selN == t.dataset.n ? null : t.dataset.n; render(); }

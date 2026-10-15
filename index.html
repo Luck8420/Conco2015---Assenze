@@ -74,6 +74,11 @@ small{color:#666}
 .ico{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:50%;background:var(--c1);color:#fff;font-size:15px;line-height:1}
 .big{position:absolute;right:3px;bottom:3px;width:clamp(28px,9vw,40px);height:clamp(28px,9vw,40px);border-radius:50%;background:#fff;color:var(--c1);display:grid;place-items:center;font-size:clamp(15px,5.2vw,23px);font-weight:800;box-shadow:0 1px 4px #0005;text-shadow:none}
 .canc{text-decoration:line-through;opacity:.6}
+.rr{display:grid;grid-template-columns:1fr 1fr auto;gap:6px;margin:6px 0;padding:8px;background:#faf8f5;border-radius:8px}
+.rr .rh{grid-column:1/-1}
+.mb h4{margin:12px 0 4px}
+.pi{display:flex;justify-content:space-between;align-items:center;gap:8px;background:#faf8f5;border-radius:8px;padding:6px 8px;margin:4px 0}
+.row>div:last-child{display:flex;flex-wrap:wrap;gap:6px}
 .btns{display:flex;flex-wrap:nowrap;gap:8px;margin:8px 0}
 .tag{display:inline-block;background:#555;color:#fff;border-radius:6px;padding:0 6px;font-size:.75rem;margin-left:4px}
 </style></head><body>
@@ -110,7 +115,15 @@ if (!code) { main.textContent = 'Usa il link ricevuto dalla società (quello con
 const db = getFirestore(initializeApp(FB));
 const col = n => collection(db, 's', code, n);
 const ref = (n, id) => doc(db, 's', code, n, id);
-const D = {players: [], extras: [], abs: [], mods: {}};
+const D = {players: [], extras: [], abs: [], mods: {}, pause: [], sched: null};
+let draft = null;
+// Calendario fisso predefinito (d: 0=dom, 1=lun ... 6=sab). Lo staff può cambiarlo dal pulsante "Calendario".
+const DEF = {versions: [{from: '2026-09-01', rules: {
+  BIANCA: [{d: 2, t: '18:00–20:00', y: 'Allenamento'}, {d: 4, t: '18:30–20:00', y: 'Allenamento'}, {d: 6, t: '', y: 'Campionato'}],
+  ROSSA: [{d: 2, t: '18:00–20:00', y: 'Allenamento'}, {d: 5, t: '18:00–19:30', y: 'Allenamento'}, {d: 6, t: '', y: 'Campionato'}]}}]};
+const SCHED = () => (D.sched && D.sched.versions && D.sched.versions.length ? D.sched : DEF);
+const DOW = ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'];
+const dmy = x => x.slice(8) + '/' + x.slice(5, 7) + '/' + x.slice(0, 4);
 const TIPI = ['Allenamento', 'Campionato', 'Amichevole', 'Torneo'];
 const kOf = t => t == 'Allenamento' ? 'A' : 'P';
 const now0 = new Date();
@@ -125,30 +138,41 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;
 const nome = n => (D.players.find(x => x.n == n) || {}).nome || '?';
 const squadra = n => (D.players.find(x => x.n == n) || {}).squadra;
 const tot = t => D.players.filter(p => p.squadra == t).length;
+const tag = e => e.canc ? `<span class="tag">ANNULLATO${e.pause ? ' · ' + esc(e.pause) : ''}</span>` : '';
 const ttl = e => esc(e.title) + (e.desc ? ' · ' + esc(e.desc) : '');
 const ab = (ev, p) => D.abs.find(r => r.ev == ev && r.p == p);
 const staffView = () => admin && tab == 'adm';
 const dl = d => { const x = new Date(d + 'T12:00'); return GG[x.getDay()] + ' ' + x.getDate() + '/' + (x.getMonth() + 1); };
 
 // Calendario fisso: martedì entrambe 18-20, giovedì Bianca 18:30-20, venerdì Rossa 18-19:30, sabato partita
+function rulesFor(team, day) {   // regole valide in quel giorno (ultima versione con "valido dal" <= giorno)
+  const v = SCHED().versions; let cur = v[0];
+  v.forEach(x => { if (x.from <= day) cur = x; });
+  return (cur.rules && cur.rules[team]) || [];
+}
 function recurring(from, to, team) {
   const r = [];
   for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
-    const w = d.getDay(), s = iso(d); let t = null, k = 'A';
-    if (w == 2) t = '18:00–20:00';
-    if (w == 4 && team == 'BIANCA') t = '18:30–20:00';
-    if (w == 5 && team == 'ROSSA') t = '18:00–19:30';
-    if (w == 6) { t = ''; k = 'P'; }
-    if (t !== null) r.push({id: s + '_' + team[0] + '_' + k, date: s, time: t, team, k, title: k == 'P' ? 'Campionato' : 'Allenamento', pre: 1});
+    const w = d.getDay(), s = iso(d), seen = {};
+    rulesFor(team, s).filter(x => x.d == w).forEach(x => {
+      const k = kOf(x.y); let id = s + '_' + team[0] + '_' + k;
+      const n = seen[id] = (seen[id] || 0) + 1; if (n > 1) id += '_' + n;
+      r.push({id, date: s, time: x.t || '', team, k, title: x.y, pre: 1});
+    });
   }
   return r;
 }
 function evs(team, a, b, wc) {   // wc = mostra anche gli eventi annullati (solo staff)
   const A = iso(a), B = iso(b), r = [];
+  // giorni in cui questa squadra ha già una partita/torneo inserito a mano o da file: sostituisce il "Campionato" generico del sabato
+  const pg = D.extras.filter(x => x.date >= A && x.date <= B && (x.team == 'TUTTE' || x.team == team) && (x.k || kOf(x.title)) == 'P').map(x => x.date);
   ['BIANCA', 'ROSSA'].forEach(t => recurring(a, b, t).forEach(e => {
     const o = D.mods[e.id];
+    if (!o && e.k == 'P' && pg.includes(e.date)) return;
     if (o) { if (o.time !== undefined) e.time = o.time; if (o.title) e.title = o.title; if (o.team) e.team = o.team; e.desc = o.desc || ''; if (o.cancel) e.canc = 1; }
     e.k = kOf(e.title);
+    const p = D.pause.find(z => z.from <= e.date && e.date <= z.to && (z.team == 'TUTTE' || z.team == e.team) && (z.what == 'Tutto' || (z.what == 'Allenamenti' ? e.k == 'A' : e.k == 'P')));
+    if (p) { e.canc = 1; e.pause = p.note || 'pausa'; }
     if (e.team == team && (!e.canc || wc)) r.push(e);
   }));
   D.extras.forEach(x => { if (x.date >= A && x.date <= B && (x.team == 'TUTTE' || x.team == team)) r.push({id: x.id, date: x.date, time: x.time || '', team, tm: x.team, k: x.k || kOf(x.title), title: x.title, desc: x.desc || '', x: 1}); });
@@ -167,7 +191,7 @@ function dayMap(a, b) {
 }
 
 function block(e, t, sv) {
-  const head = `<span class="${e.canc ? 'canc' : ''}"><b>${esc(e.time) || '—'}</b><br>${ttl(e)}</span>${e.canc ? '<span class="tag">ANNULLATO</span>' : ''}`;
+  const head = `<span class="${e.canc ? 'canc' : ''}"><b>${esc(e.time) || '—'}</b><br>${ttl(e)}</span>${tag(e)}`;
   if (sv) {
     const n = D.abs.filter(r => r.ev == e.id && squadra(r.p) == t).length;
     return `<div class="blk ${t}"><b>${t == 'BIANCA' ? 'Bianca' : 'Rossa'}</b> · ${head}<br><span class="${n ? 'bad' : ''}">${n} assenti su ${tot(t)}</span></div>`;
@@ -217,8 +241,8 @@ function detail() {
   ['BIANCA', 'ROSSA'].forEach(t => evs(t, d, d, true).forEach(e => {
     const as = D.abs.filter(r => r.ev == e.id && squadra(r.p) == t).sort((p, q) => nome(p.p).localeCompare(nome(q.p)));
     const open = as.find(r => selN == e.id + '__' + r.p);
-    h += `<div class="card ${t}"><div><b>${t == 'BIANCA' ? 'Bianca' : 'Rossa'}</b> · <span class="${e.canc ? 'canc' : ''}">${esc(e.time)} ${ttl(e)}</span>${e.canc ? '<span class="tag">ANNULLATO</span>' : ''}</div>
-      <div class="btns"><button data-edit="${e.id}">Modifica</button>${e.x ? `<button data-del="${e.id}">Elimina</button>` : ''}</div>
+    h += `<div class="card ${t}"><div><b>${t == 'BIANCA' ? 'Bianca' : 'Rossa'}</b> · <span class="${e.canc ? 'canc' : ''}">${esc(e.time)} ${ttl(e)}</span>${tag(e)}</div>
+      <div class="btns"><button data-edit="${e.id}">Modifica</button>${e.x ? `<button data-del="${e.id}">Elimina</button>` : (e.pause ? '' : `<button data-canc="${e.id}">${e.canc ? 'Ripristina' : 'Annulla'}</button>`)}</div>
       <span class="cnt ${as.length ? 'bad' : ''}">${as.length} assenti su ${tot(t)}</span><div class="chips">${as.length ? as.map(r => `<button class="chip${open == r ? ' on' : ''}" data-n="${e.id}__${r.p}">✖ ${esc(nome(r.p))}</button>`).join('') : 'nessuna assenza'}</div>
       ${open ? `<div class="nota"><b>${esc(nome(open.p))}</b>: ${esc(open.note) || 'nessuna nota'}</div>` : ''}</div>`;
   }));
@@ -232,7 +256,7 @@ function render() {
   const ICON = '<svg viewBox="0 0 32 32"><circle cx="16" cy="6.5" r="4.5"/><path d="M9 13.5l5-3h4l5 3 2.5 6.5-4 1.5V30H10.5V21.5L6.5 20z"/><circle cx="27" cy="27" r="3.2"/></svg>';
   let h = sv ? '' : `<div class="sel-box"><div class="lab">${ICON} Seleziona giocatore</div><select id="pl"><option value="">Scegli il giocatore…</option>${D.players.map(p => `<option value="${p.n}" ${p.n == me ? 'selected' : ''}>${esc(p.nome)}</option>`).join('')}</select>${squadra(me) ? '<small class="okm">✓ Ricordato su questo telefono · puoi cambiarlo quando vuoi</small>' : ''}</div>`;
   h += `<div class="row"><div><button class="${vw == 'w' ? 'on' : ''}" data-vw="w">Settimana</button> <button class="${vw == 'm' ? 'on' : ''}" data-vw="m">Mese</button></div>` +
-    (sv ? `<div><button class="pri" data-m="add">+ Evento</button> <button data-m="rep">⬇ Report</button> <button data-m="pl">Giocatori</button></div>` : '') + '</div>';
+    (sv ? `<div><button class="pri" data-m="add">+ Evento</button> <button data-m="rep">⬇ Report</button> <button data-m="cal">Calendario</button> <button data-m="pl">Giocatori</button></div>` : '') + '</div>';
   if (!D.players.length) h += sv ? '<p>Nessun giocatore: caricali con il pulsante "Giocatori".</p>' : '<p>Elenco giocatori non ancora caricato.</p>';
   else if (!sv && !squadra(me)) h += '<p>Scegli il giocatore per vedere gli eventi.</p>';
   else {
@@ -245,6 +269,7 @@ function render() {
   main.innerHTML = h;
 }
 
+const wrap = h => `<div class="ov"><div class="mb"><button data-close style="float:right">✕</button>${h}</div></div>`;
 function openModal(k, d) {
   let h = '';
   if (k == 'day') {
@@ -266,22 +291,57 @@ function openModal(k, d) {
     const dd = new Date(sel + 'T12:00'), e = ['BIANCA', 'ROSSA'].flatMap(t => evs(t, dd, dd, true)).find(x => x.id == d);
     if (!e) return;
     const teams = e.x ? ['TUTTE', 'BIANCA', 'ROSSA'] : ['BIANCA', 'ROSSA'], cur = e.x ? e.tm : e.team, types = TIPI.includes(e.title) ? TIPI : TIPI.concat([e.title]);
-    h = `<h3>Modifica evento · ${dl(e.date)}</h3><small>Orario</small><input id="mt" value="${esc(e.time)}" placeholder="es. 18:00–20:00">
+    h = `<h3>Modifica evento · ${dl(e.date)}</h3>${e.pause ? `<p class="bad">Annullato dalla pausa "${esc(e.pause)}": modifica o elimina la pausa dal pulsante Calendario.</p>` : ''}<small>Orario</small><input id="mt" value="${esc(e.time)}" placeholder="es. 18:00–20:00">
       <small>Tipo</small><select id="my">${types.map(t => `<option ${t == e.title ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
       <small>Squadra</small><select id="mq">${teams.map(t => `<option ${t == cur ? 'selected' : ''}>${t}</option>`).join('')}</select>
       <small>Dettagli (facoltativo, es. avversario)</small><input id="md" maxlength="80" value="${esc(e.desc)}">
       ${e.x ? '' : `<p><label><input type="checkbox" id="mc" style="width:auto" ${e.canc ? 'checked' : ''}> Evento annullato (i genitori non lo vedono)</label></p>`}
       <button class="pri" data-save="${e.id}" data-x="${e.x ? 1 : 0}">Salva</button>${e.x ? '' : ` <button data-reset="${e.id}">Ripristina predefinito</button>`}`;
   }
+  else if (k == 'cal') { initDraft(); h = calHTML(); }
   else if (k == 'pin') h = `<h3>Area staff</h3><p>${cfg === false ? 'Prima volta: scegli un PIN (almeno 4 caratteri).' : 'Inserisci il PIN.'}</p>
     <input type="password" id="pin" autocomplete="off" placeholder="PIN"><small id="perr" class="bad"></small><br><button class="pri" id="pok">Entra</button>`;
   else if (k == 'rep') h = `<h3>Report presenze</h3><small>Dal</small><input type="date" id="rf" value="${INIZIO}"><small>Al</small><input type="date" id="rt" value="${iso(new Date())}">
     <button class="pri" id="dr">⬇ Scarica CSV (Excel)</button><p><small>Conta solo gli eventi già trascorsi. Chi non ha segnalato assenza risulta presente.</small></p>`;
   else if (k == 'pl') h = `<h3>Elenco giocatori</h3><p>${D.players.length} giocatori caricati. Per caricarli o aggiornarli scegli il file (CSV o Excel) con le colonne n;nome;squadra:</p><input type="file" id="csv" accept=".csv,.xlsx,.xls,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel">`;
-  mod.innerHTML = `<div class="ov"><div class="mb"><button data-close style="float:right">✕</button>${h}</div></div>`;
+  mod.innerHTML = wrap(h);
   if (k == 'pin') $('#pin').focus();
 }
 const closeModal = () => { mod.innerHTML = ''; };
+function initDraft() {
+  const v = SCHED().versions, td = iso(new Date()); let cur = v[0];
+  v.forEach(x => { if (x.from <= td) cur = x; });
+  draft = {from: td, rules: Object.assign({BIANCA: [], ROSSA: []}, JSON.parse(JSON.stringify(cur.rules)))};
+}
+function readDraft() {
+  if (!draft) return;
+  const f = mod.querySelector('#sfrom'); if (f) draft.from = f.value;
+  ['BIANCA', 'ROSSA'].forEach(t => { draft.rules[t] = [...mod.querySelectorAll(`.rr[data-rt="${t}"]`)].map(r => ({d: Number(r.querySelector('.rd').value), t: r.querySelector('.rh').value.trim(), y: r.querySelector('.ry').value})); });
+}
+function calHTML() {
+  const v = SCHED().versions;
+  const rows = t => draft.rules[t].map((r, i) => `<div class="rr" data-rt="${t}" data-ri="${i}"><select class="rd">${[1, 2, 3, 4, 5, 6, 0].map(n => `<option value="${n}" ${n == r.d ? 'selected' : ''}>${DOW[n]}</option>`).join('')}</select>
+    <select class="ry">${TIPI.map(y => `<option ${y == r.y ? 'selected' : ''}>${y}</option>`).join('')}</select><button data-rdel="${t}:${i}">✕</button>
+    <input class="rh" placeholder="Orario (es. 18:00–20:00; vuoto = nessun orario)" value="${esc(r.t)}"></div>`).join('');
+  const pauses = D.pause.slice().sort((a, b) => a.from.localeCompare(b.from)).map(p => `<div class="pi"><span><b>${dmy(p.from)} → ${dmy(p.to)}</b> · ${p.team == 'TUTTE' ? 'Tutte le squadre' : p.team} · ${esc(p.what)}${p.note ? ' · ' + esc(p.note) : ''}</span><button data-pdel="${p.id}">✕</button></div>`).join('') || '<small>Nessuna pausa inserita.</small>';
+  return `<h3>Calendario fisso</h3><p><small>Scegli i giorni di allenamento e di campionato di ogni squadra. Vale dalla data indicata in poi: gli eventi passati non cambiano.</small></p>
+    <small>Valido dal</small><input type="date" id="sfrom" value="${draft.from}">
+    <h4>Bianca</h4>${rows('BIANCA')}<button data-radd="BIANCA">+ Aggiungi giorno</button>
+    <h4>Rossa</h4>${rows('ROSSA')}<button data-radd="ROSSA">+ Aggiungi giorno</button>
+    <p><button class="pri" data-ssave>Salva calendario</button></p>
+    ${v.length > 1 ? `<p><small>Calendari programmati: ${v.map((x, i) => `dal ${dmy(x.from)}${i ? ` <button data-vdel="${x.from}">✕</button>` : ''}`).join(' · ')}</small></p>` : ''}
+    <hr><h3>Pause e annullamenti</h3><p><small>Per annullare in blocco gli allenamenti o il campionato del sabato (pausa invernale, sabati senza gara). Per un singolo giorno usa il pulsante Annulla nell'evento.</small></p>
+    ${pauses}
+    <small>Dal</small><input type="date" id="pf"><small>Al</small><input type="date" id="pt">
+    <small>Squadra</small><select id="pq"><option value="TUTTE">Tutte le squadre</option><option>BIANCA</option><option>ROSSA</option></select>
+    <small>Cosa annullare</small><select id="pw"><option>Allenamenti</option><option>Campionato</option><option>Tutto</option></select>
+    <small>Motivo (facoltativo)</small><input id="pn" maxlength="60" placeholder="es. Pausa natalizia"><button class="pri" data-padd>Aggiungi pausa</button>`;
+}
+function rerenderCal() {
+  const old = mod.querySelector('.mb'), y = old ? old.scrollTop : 0;
+  mod.innerHTML = wrap(calHTML());
+  const nu = mod.querySelector('.mb'); if (nu) nu.scrollTop = y;
+}
 
 const TMAP = {allenamento: 'Allenamento', campionato: 'Campionato', partita: 'Campionato', amichevole: 'Amichevole', torneo: 'Torneo'};
 function parseDate(x) {
@@ -398,6 +458,25 @@ document.body.onclick = async e => {
     else if (t.dataset.cur !== undefined) { wk = 0; mon = {y: now0.getFullYear(), m: now0.getMonth()}; render(); }
     else if (t.dataset.tpl !== undefined) templateCsv();
     else if (t.dataset.tplx !== undefined) await templateXlsx();
+    else if (t.dataset.radd) { readDraft(); draft.rules[t.dataset.radd].push({d: 1, t: '18:00–20:00', y: 'Allenamento'}); rerenderCal(); }
+    else if (t.dataset.rdel) { readDraft(); const [tm, i] = t.dataset.rdel.split(':'); draft.rules[tm].splice(Number(i), 1); rerenderCal(); }
+    else if (t.dataset.ssave !== undefined) {
+      readDraft();
+      if (!parseDate(draft.from)) return alert('Scegli la data di inizio validità.');
+      const nv = SCHED().versions.filter(x => x.from !== draft.from).concat([{from: draft.from, rules: draft.rules}]).sort((a, b) => a.from.localeCompare(b.from));
+      await setDoc(ref('config', 'schedule'), {versions: nv}); closeModal();
+    }
+    else if (t.dataset.vdel) {
+      const nv = SCHED().versions.filter(x => x.from !== t.dataset.vdel);
+      if (nv.length && confirm('Eliminare questo calendario programmato?')) { readDraft(); await setDoc(ref('config', 'schedule'), {versions: nv}); rerenderCal(); }
+    }
+    else if (t.dataset.padd !== undefined) {
+      const o = {from: $('#pf').value, to: $('#pt').value, team: $('#pq').value, what: $('#pw').value, note: $('#pn').value.trim()};
+      if (!o.from || !o.to || o.from > o.to) return alert('Controlla le date: "Dal" deve essere prima di "Al".');
+      readDraft(); await addDoc(col('pause'), o); rerenderCal();
+    }
+    else if (t.dataset.pdel) { readDraft(); await deleteDoc(ref('pause', t.dataset.pdel)); rerenderCal(); }
+    else if (t.dataset.canc) { const id = t.dataset.canc, cur = !!(D.mods[id] && D.mods[id].cancel); await setDoc(ref('modifiche', id), {cancel: !cur}, {merge: true}); }
     else if (t.dataset.mo) { const d = new Date(mon.y, mon.m + Number(t.dataset.mo), 1); mon = {y: d.getFullYear(), m: d.getMonth()}; render(); }
     else if (t.dataset.m) openModal(t.dataset.m);
     else if (t.dataset.n) { selN = selN == t.dataset.n ? null : t.dataset.n; render(); }
@@ -433,6 +512,8 @@ const fail = () => { main.textContent = 'Impossibile caricare i dati. Controlla 
 onSnapshot(col('giocatori'), s => { D.players = s.docs.map(d => d.data()).sort((a, b) => a.nome.localeCompare(b.nome)); render(); }, fail);
 onSnapshot(col('eventi'), s => { D.extras = s.docs.map(d => ({id: d.id, ...d.data()})); render(); }, fail);
 onSnapshot(col('modifiche'), s => { D.mods = {}; s.docs.forEach(d => { D.mods[d.id] = d.data(); }); render(); }, fail);
+onSnapshot(col('pause'), s => { D.pause = s.docs.map(d => ({id: d.id, ...d.data()})); render(); }, fail);
+onSnapshot(ref('config', 'schedule'), s => { D.sched = s.exists() ? s.data() : null; render(); }, () => {});
 onSnapshot(col('assenze'), s => { D.abs = s.docs.map(d => d.data()); render(); }, fail);
 onSnapshot(ref('config', 'staff'), s => { cfg = s.exists() ? s.data() : false; checkAuto(); }, () => {});
 document.body.onkeydown = e => { if (e.key == 'Enter' && e.target.id == 'pin') submitPin(); };

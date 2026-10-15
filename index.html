@@ -37,10 +37,14 @@ select{width:100%}
 .blk{border-left:6px solid #999;background:#faf8f5;border-radius:8px;padding:6px 8px;margin-bottom:6px;font-size:.9rem}
 .blk.ROSSA{border-color:var(--rossa)}
 .bad{color:var(--rossa);font-weight:700}
-.mh{display:flex;align-items:center;justify-content:space-between;margin:6px 0;text-transform:capitalize}
+.mh{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:6px 0;text-align:center;text-transform:capitalize}
+.mh button{padding:8px 14px}
 .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
 .cw{text-align:center;font-weight:700;font-size:.8rem;color:#666}
-.cd{aspect-ratio:1;border-radius:8px;background:#fff;padding:4px;font-weight:600;position:relative}
+.cd{height:clamp(68px,18vw,100px);overflow:hidden;border-radius:8px;background:#fff;padding:4px;font-weight:700;position:relative;line-height:1.1}
+.lbs{display:block;margin-top:2px}
+.lb{display:block;font-size:clamp(.56rem,2.7vw,.74rem);font-weight:600;line-height:1.2}
+.cd.both{text-shadow:0 0 3px #fff,0 0 3px #fff}
 .cd[data-day]{cursor:pointer}
 .cd.b{background:var(--bianca)}.cd.r{background:var(--rossa);color:#fff}
 .cd.both{background:linear-gradient(135deg,var(--bianca) 50%,var(--rossa) 50%)}
@@ -48,9 +52,10 @@ select{width:100%}
 .leg{font-size:.85rem;color:#555}.sw{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:middle;margin:0 3px 0 8px}
 .card{background:#fff;border-radius:10px;padding:10px;margin:8px 0;border-left:7px solid #999}
 .card.ROSSA{border-color:var(--rossa)}.card.ass{background:#fdecea}
-.chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
-.chip{padding:5px 10px;border-radius:999px}.chip.on{background:#111;color:#fff;border-color:#111}
-.nota{background:#fff3cd;border-radius:8px;padding:6px 8px;margin-top:4px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+.chip{padding:9px 14px;border-radius:999px;font-size:1.05rem;font-weight:800;background:#fdecea;border:2px solid var(--c1);color:var(--c1)}.chip.on{background:var(--c1);color:#fff}
+.cnt{font-size:1.05rem}
+.nota{background:#fff3cd;border-left:5px solid #e0a800;border-radius:8px;padding:8px 10px;margin-top:4px;font-size:1rem}
 .ov{position:fixed;inset:0;background:#0007;display:flex;align-items:flex-end;justify-content:center;z-index:20}
 .mb{background:#fff;width:100%;max-width:520px;border-radius:16px 16px 0 0;padding:14px;max-height:88vh;overflow:auto}
 @media(min-width:600px){.ov{align-items:center}.mb{border-radius:16px}}
@@ -67,7 +72,7 @@ small{color:#666}
 .ev .dh{margin-bottom:4px}
 .abs{display:flex;align-items:center;gap:6px;margin-top:8px;font-weight:700;color:var(--c1)}
 .ico{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:50%;background:var(--c1);color:#fff;font-size:15px;line-height:1}
-.big{position:absolute;right:3px;bottom:3px;width:60%;height:60%;border-radius:50%;background:#fff;color:var(--c1);display:grid;place-items:center;font-size:clamp(16px,6.5vw,30px);font-weight:800;box-shadow:0 1px 4px #0005}
+.big{position:absolute;right:3px;bottom:3px;width:clamp(28px,9vw,40px);height:clamp(28px,9vw,40px);border-radius:50%;background:#fff;color:var(--c1);display:grid;place-items:center;font-size:clamp(15px,5.2vw,23px);font-weight:800;box-shadow:0 1px 4px #0005;text-shadow:none}
 .canc{text-decoration:line-through;opacity:.6}
 .btns{display:flex;flex-wrap:nowrap;gap:8px;margin:8px 0}
 .tag{display:inline-block;background:#555;color:#fff;border-radius:6px;padding:0 6px;font-size:.75rem;margin-left:4px}
@@ -109,9 +114,11 @@ const D = {players: [], extras: [], abs: [], mods: {}};
 const TIPI = ['Allenamento', 'Campionato', 'Amichevole', 'Torneo'];
 const kOf = t => t == 'Allenamento' ? 'A' : 'P';
 const now0 = new Date();
-let me = store.get('me'), vw = 'w', mon = {y: now0.getFullYear(), m: now0.getMonth()}, tab = 'ev', admin = false, sel = null, selN = null;
+let me = store.get('me'), vw = 'w', wk = 0, mon = {y: now0.getFullYear(), m: now0.getMonth()}, tab = 'ev', admin = false, sel = null, selN = null;
 
 const GG = ['dom','lun','mar','mer','gio','ven','sab'];
+const MES3 = ['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic'];
+const abb = t => ({Allenamento: 'Allen.', Campionato: 'Camp.', Amichevole: 'Amic.', Torneo: 'Torneo'}[t] || String(t).slice(0, 5) + '.');
 const MESI = ['gennaio','febbraio','marzo','aprile','maggio','giugno','luglio','agosto','settembre','ottobre','novembre','dicembre'];
 const iso = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -149,7 +156,7 @@ function evs(team, a, b, wc) {   // wc = mostra anche gli eventi annullati (solo
 }
 function range() {
   const n = new Date(); n.setHours(0,0,0,0);
-  const m = new Date(n); m.setDate(n.getDate() - ((n.getDay() + 6) % 7));
+  const m = new Date(n); m.setDate(n.getDate() - ((n.getDay() + 6) % 7) + 7 * wk);
   const e = new Date(m); e.setDate(m.getDate() + 6); return [m, e];
 }
 // data -> {BIANCA:[eventi], ROSSA:[eventi]}   (Bianca sempre sopra, Rossa sotto)
@@ -169,7 +176,7 @@ function block(e, t, sv) {
 }
 function weekHTML(m) {
   const ds = Object.keys(m).sort(), sv = staffView(), td = iso(new Date());
-  if (!ds.length) return '<p>Nessun evento questa settimana.</p>';
+  if (!ds.length) return '<p>Nessun evento in questa settimana.</p>';
   if (!sv) return '<div class="pgrid">' + ds.flatMap(d => m[d][squadra(me)]).map(e => {
     const x = ab(e.id, me);
     return `<div class="ev ${e.team}${x ? ' ass' : ''}" data-day="${e.date}"><div class="dh">${dl(e.date)}</div><b>${esc(e.time) || '—'}</b><br>${ttl(e)}${x ? '<div class="abs"><span class="ico">✖</span> Assente</div>' : ''}</div>`;
@@ -177,9 +184,18 @@ function weekHTML(m) {
   return '<div class="strip">' + ds.map(d => `<div class="col${sv && d == sel ? ' sel' : ''}${d == td ? ' today' : ''}" data-day="${d}"><div class="dh">${dl(d)}</div>` +
     ['BIANCA', 'ROSSA'].map(t => m[d][t].map(e => block(e, t, sv)).join('')).join('') + '</div>').join('') + '</div>';
 }
+function navHTML() {
+  if (vw == 'w') {
+    const [x, y] = range(), same = x.getMonth() == y.getMonth();
+    const lab = same ? `${x.getDate()}–${y.getDate()} ${MESI[x.getMonth()]} ${y.getFullYear()}` : `${x.getDate()} ${MES3[x.getMonth()]} – ${y.getDate()} ${MES3[y.getMonth()]} ${y.getFullYear()}`;
+    return `<div class="mh"><button data-wk="-1">◀</button><div><b>Settimana ${lab}</b><br><small>${wk == 0 ? 'settimana corrente' : `<button data-cur>↺ torna a questa settimana</button>`}</small></div><button data-wk="1">▶</button></div>`;
+  }
+  const cur = mon.y == now0.getFullYear() && mon.m == now0.getMonth();
+  return `<div class="mh"><button data-mo="-1">◀</button><div><b>${MESI[mon.m]} ${mon.y}</b><br><small>${cur ? 'mese corrente' : `<button data-cur>↺ torna a questo mese</button>`}</small></div><button data-mo="1">▶</button></div>`;
+}
 function monthHTML(m) {
   const sv = staffView(), td = iso(new Date()), last = new Date(mon.y, mon.m + 1, 0), lead = (new Date(mon.y, mon.m, 1).getDay() + 6) % 7;
-  let h = `<div class="mh"><button data-mo="-1">◀</button><b>${MESI[mon.m]} ${mon.y}</b><button data-mo="1">▶</button></div><div class="cal">` +
+  let h = `<div class="cal">` +
     ['L','M','M','G','V','S','D'].map(x => `<div class="cw">${x}</div>`).join('') + '<div></div>'.repeat(lead);
   for (let d = 1; d <= last.getDate(); d++) {
     const s = iso(new Date(mon.y, mon.m, d)), ev = m[s]; let c = 'cd', x = '';
@@ -187,7 +203,9 @@ function monthHTML(m) {
       const b = ev.BIANCA.length, r = ev.ROSSA.length; c += b && r ? ' both' : r ? ' r' : ' b';
       if (!sv && ev.BIANCA.concat(ev.ROSSA).some(e => ab(e.id, me))) x = '<span class="big">✖</span>';
     }
-    h += `<div class="${c}${s == td ? ' today' : ''}${sv && s == sel ? ' sel' : ''}"${ev ? ` data-day="${s}"` : ''}>${d}${x}</div>`;
+    const lab = ev ? (sv ? ['BIANCA', 'ROSSA'].flatMap(t => ev[t].map(e => `<span class="lb${e.canc ? ' canc' : ''}">${t[0]} ${esc(abb(e.title))}</span>`))
+      : ev[squadra(me)].map(e => `<span class="lb">${esc(abb(e.title))}</span>`)).join('') : '';
+    h += `<div class="${c}${s == td ? ' today' : ''}${sv && s == sel ? ' sel' : ''}"${ev ? ` data-day="${s}"` : ''}>${d}<span class="lbs">${lab}</span>${x}</div>`;
   }
   const leg = staffView() ? `<span class="sw" style="background:var(--bianca)"></span>Bianca <span class="sw" style="background:var(--rossa)"></span>Rossa`
     : `<span class="sw" style="background:var(--${squadra(me) == 'ROSSA' ? 'rossa' : 'bianca'})"></span>giorno con evento · ✖ = assente`;
@@ -201,7 +219,7 @@ function detail() {
     const open = as.find(r => selN == e.id + '__' + r.p);
     h += `<div class="card ${t}"><div><b>${t == 'BIANCA' ? 'Bianca' : 'Rossa'}</b> · <span class="${e.canc ? 'canc' : ''}">${esc(e.time)} ${ttl(e)}</span>${e.canc ? '<span class="tag">ANNULLATO</span>' : ''}</div>
       <div class="btns"><button data-edit="${e.id}">Modifica</button>${e.x ? `<button data-del="${e.id}">Elimina</button>` : ''}</div>
-      <b>${as.length} assenti su ${tot(t)}</b><div class="chips">${as.length ? as.map(r => `<button class="chip${open == r ? ' on' : ''}" data-n="${e.id}__${r.p}">${esc(nome(r.p))}</button>`).join('') : 'nessuna assenza'}</div>
+      <span class="cnt ${as.length ? 'bad' : ''}">${as.length} assenti su ${tot(t)}</span><div class="chips">${as.length ? as.map(r => `<button class="chip${open == r ? ' on' : ''}" data-n="${e.id}__${r.p}">✖ ${esc(nome(r.p))}</button>`).join('') : 'nessuna assenza'}</div>
       ${open ? `<div class="nota"><b>${esc(nome(open.p))}</b>: ${esc(open.note) || 'nessuna nota'}</div>` : ''}</div>`;
   }));
   return h + `<p><button data-logout>Esci dall'area staff</button></p>`;
@@ -221,7 +239,7 @@ function render() {
     const [a, b] = vw == 'w' ? range() : [new Date(mon.y, mon.m, 1), new Date(mon.y, mon.m + 1, 0)];
     const m = dayMap(a, b);
     if (sv && !(sel && m[sel])) { const ds = Object.keys(m).sort(); sel = ds.find(d => d >= iso(new Date())) || ds[0] || null; }
-    h += vw == 'w' ? weekHTML(m) : monthHTML(m);
+    h += navHTML() + (vw == 'w' ? weekHTML(m) : monthHTML(m));
     if (sv) h += detail();
   }
   main.innerHTML = h;
@@ -241,7 +259,9 @@ function openModal(k, d) {
   } else if (k == 'add') h = `<h3>Aggiungi evento extra</h3><small>Data</small><input type="date" id="ed"><small>Orario</small><input id="et" placeholder="es. 10:00–12:00">
     <small>Squadra</small><select id="etm"><option>TUTTE</option><option>BIANCA</option><option>ROSSA</option></select>
     <small>Tipo</small><select id="ek">${TIPI.map(t => `<option>${t}</option>`).join('')}</select>
-    <small>Dettagli (facoltativo, es. avversario)</small><input id="eti" maxlength="80"><button class="pri" id="ea">Aggiungi</button>`;
+    <small>Dettagli (facoltativo, es. avversario)</small><input id="eti" maxlength="80"><button class="pri" id="ea">Aggiungi</button>
+    <hr><p><b>Oppure carica più eventi da file CSV</b><br><small>Colonne: data;orario;squadra;tipo;dettagli</small></p>
+    <input type="file" id="ecsv" accept=".csv,text/csv,text/plain"><p><button data-tpl>⬇ Scarica il modello CSV</button></p>`;
   else if (k == 'edit') {
     const dd = new Date(sel + 'T12:00'), e = ['BIANCA', 'ROSSA'].flatMap(t => evs(t, dd, dd, true)).find(x => x.id == d);
     if (!e) return;
@@ -263,6 +283,37 @@ function openModal(k, d) {
 }
 const closeModal = () => { mod.innerHTML = ''; };
 
+const TMAP = {allenamento: 'Allenamento', campionato: 'Campionato', partita: 'Campionato', amichevole: 'Amichevole', torneo: 'Torneo'};
+function parseDate(x) {
+  let m = x.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  m = x.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
+  return m ? `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}` : null;
+}
+function templateCsv() {
+  const csv = '\ufeffdata;orario;squadra;tipo;dettagli\n2026-11-07;15:00;BIANCA;Campionato;vs Esempio Calcio\n2026-11-07;16:30;ROSSA;Campionato;vs Altra Squadra\n2026-11-14;10:00–12:00;TUTTE;Torneo;Torneo di esempio\n2026-11-15;10:30;BIANCA;Amichevole;\n';
+  const l = document.createElement('a');
+  l.href = URL.createObjectURL(new Blob([csv], {type: 'text/csv'})); l.download = 'eventi_modello.csv'; l.click();
+}
+async function importEvents(txt) {
+  const lines = txt.replace(/^\ufeff/, '').split(/\r?\n/).filter(l => l.trim());
+  if (!lines.length) return alert('File vuoto.');
+  const sep = lines[0].includes(';') ? ';' : ',', ok = [], bad = [];
+  lines.forEach((l, i) => {
+    const c = l.split(sep).map(x => x.trim().replace(/^"|"$/g, '')), date = parseDate(c[0] || '');
+    if (!date) { if (i > 0) bad.push(i + 1); return; }   // la prima riga (intestazione) viene saltata
+    const team = (c[2] || '').toUpperCase(), title = TMAP[(c[3] || '').toLowerCase()];
+    if (!['BIANCA', 'ROSSA', 'TUTTE'].includes(team) || !title) { bad.push(i + 1); return; }
+    ok.push({date, time: c[1] || '', team, k: kOf(title), title, desc: c[4] || ''});
+  });
+  if (!ok.length) return alert('Nessun evento valido. Controlla le colonne: data;orario;squadra;tipo;dettagli');
+  for (let i = 0; i < ok.length; i += 400) {
+    const wb = writeBatch(db);
+    ok.slice(i, i + 400).forEach(o => wb.set(ref('eventi', 'i_' + [o.date, o.team, o.title, o.time].join('_').replace(/[^A-Za-z0-9_-]/g, '-')), o));
+    await wb.commit();
+  }
+  closeModal(); alert(ok.length + ' eventi caricati.' + (bad.length ? ' Righe ignorate, da controllare: ' + bad.join(', ') + '.' : ''));
+}
 function report(from, to) {
   const today = new Date(); today.setHours(12,0,0,0);
   const A = new Date(from + 'T12:00'); let B = new Date(to + 'T12:00'); if (B > today) B = today;
@@ -295,6 +346,7 @@ async function submitPin() {
 
 document.body.onchange = async e => {
   if (e.target.id == 'pl') { me = e.target.value; store.set('me', me); e.target.blur(); render(); }
+  else if (e.target.id == 'ecsv' && e.target.files[0]) { try { await importEvents(await e.target.files[0].text()); } catch (err) { alert('Errore: ' + (err.message || err)); } }
   else if (e.target.id == 'csv' && e.target.files[0]) {
     const righe = (await e.target.files[0].text()).split(/\r?\n/).map(l => l.split(';')).map(c => ({n: Number(c[0]), nome: (c[1] || '').trim().replace(/^"|"$/g, ''), squadra: (c[2] || '').trim().toUpperCase()}))
       .filter(r => r.n > 0 && r.nome && (r.squadra == 'BIANCA' || r.squadra == 'ROSSA'));
@@ -311,6 +363,9 @@ document.body.onclick = async e => {
     else if (t.id == 'st') openModal('pin');
     else if (t.id == 'pok') await submitPin();
     else if (t.dataset.vw) { vw = t.dataset.vw; render(); }
+    else if (t.dataset.wk) { wk += Number(t.dataset.wk); render(); }
+    else if (t.dataset.cur !== undefined) { wk = 0; mon = {y: now0.getFullYear(), m: now0.getMonth()}; render(); }
+    else if (t.dataset.tpl !== undefined) templateCsv();
     else if (t.dataset.mo) { const d = new Date(mon.y, mon.m + Number(t.dataset.mo), 1); mon = {y: d.getFullYear(), m: d.getMonth()}; render(); }
     else if (t.dataset.m) openModal(t.dataset.m);
     else if (t.dataset.n) { selN = selN == t.dataset.n ? null : t.dataset.n; render(); }

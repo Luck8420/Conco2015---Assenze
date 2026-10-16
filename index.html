@@ -83,6 +83,7 @@ small{color:#666}
 .tag{display:inline-block;background:#555;color:#fff;border-radius:6px;padding:0 6px;font-size:.75rem;margin-left:4px}
 .summary-box{background:#fff;border-radius:12px;padding:12px;margin:12px 0;box-shadow:0 1px 3px #0001}
 .summary-box h4{margin:0 0 8px 0;color:var(--c1)}
+.avv{background:#fff3cd;border-left:6px solid #e0a800;border-radius:10px;padding:10px 12px;margin:10px 0;font-size:.95rem;line-height:1.4}
 .sh{font-weight:800;color:var(--c1);margin:14px 0 0}
 .sg{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin:8px 0 12px}
 .sc{background:#fff;border-radius:12px;padding:10px 12px;box-shadow:0 1px 3px #0001}
@@ -93,11 +94,15 @@ small{color:#666}
 .okk{color:#2e7d32}
 .summary-item{margin-bottom:8px;font-size:.9rem;border-bottom:1px solid #eee;padding-bottom:6px}
 .welcome-screen{display:flex;flex-direction:column;gap:12px;padding:10px 0}
+#upd{position:fixed;left:0;right:0;bottom:0;z-index:60;background:#222;color:#fff;padding:12px 14px;display:flex;gap:12px;align-items:center;justify-content:center;font-size:.95rem}
+#upd[hidden]{display:none}
 </style></head><body>
 <header><img id="logo" src="stemma.png" alt="" onerror="this.remove()">
 <h1><span class="t1">Concorezzese</span><span class="t2">Esordienti U12 · 2015</span><span class="t3">Gestione assenze</span></h1><div id="hr"></div></header>
 <main id="main">Caricamento…</main>
 <div id="modal"></div>
+<div id="ver" style="text-align:center;color:#999;font-size:.75rem;margin:16px 0 70px"></div>
+<div id="upd" hidden></div>
 <script type="module">
 import {initializeApp} from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import {getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, setDoc, addDoc, deleteDoc, getDoc, onSnapshot, writeBatch, query, where} from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
@@ -113,7 +118,23 @@ const FB = {
 const INIZIO = '2026-09-01';
 
 const $ = s => document.querySelector(s);
+const APP_VERSION = '1.0';   // da cambiare ad ogni nuovo file caricato su GitHub
 const main = $('#main'), mod = $('#modal');
+$('#ver').textContent = 'Versione ' + APP_VERSION;
+// Controlla in silenzio se su GitHub c'è una versione più recente della pagina
+let lastCheck = 0;
+async function checkUpdate() {
+  if (Date.now() - lastCheck < 5 * 60 * 1000 || !navigator.onLine) return;
+  lastCheck = Date.now();
+  try {
+    const r = await fetch(location.pathname + '?nocache=' + Date.now(), {cache: 'no-store'});
+    const m = /const APP_VERSION = '([^']+)'/.exec(await r.text());
+    if (m && m[1] !== APP_VERSION) {
+      $('#upd').hidden = false;
+      $('#upd').innerHTML = '<span>Nuova versione disponibile</span><button class="pri" data-upd>Aggiorna</button>';
+    }
+  } catch (_) { /* offline o errore di rete: riprova alla prossima apertura */ }
+}
 const store = {
   get(k) { try { const v = localStorage.getItem(k); if (v !== null) return v; } catch (_) {} const m = document.cookie.match(new RegExp('(?:^|; )' + k + '=([^;]*)')); return m ? decodeURIComponent(m[1]) : ''; },
   set(k, v) { try { localStorage.setItem(k, v); } catch (_) {} document.cookie = k + '=' + encodeURIComponent(v) + ';max-age=31536000;path=' + location.pathname.replace(/[^/]*$/, '') + ';SameSite=Lax'; }
@@ -315,6 +336,25 @@ function monthHTML(m) {
   let html = h + `</div><p class="leg">${leg}</p>`;
   return html;
 }
+// Avviso per lo staff: assenze segnalate dopo l'ultimo "Ho visto", solo per eventi da oggi in avanti.
+// Le assenze eliminate nel frattempo non compaiono (si legge solo ciò che esiste ancora).
+const AVVISI_DA = 1792184043000;   // le assenze inserite prima di questo momento non generano avvisi
+function novita() {
+  const since = Math.max(Number(store.get('seen')) || 0, AVVISI_DA);
+  const a = new Date(); a.setHours(0, 0, 0, 0);
+  const b = new Date(a); b.setDate(b.getDate() + 300);
+  const byId = new Map(); allEvs(a, b).forEach(e => byId.set(e.id + '|' + e.team, e));
+  return D.abs.filter(r => (r.ts || 0) > since)
+    .map(r => ({r, e: byId.get(r.ev + '|' + squadra(r.p))}))
+    .filter(x => x.e && !x.e.canc)
+    .sort((p, q) => (p.e.date + p.e.time).localeCompare(q.e.date + q.e.time) || nome(p.r.p).localeCompare(nome(q.r.p)));
+}
+function avvisoHTML() {
+  const n = novita(); if (!n.length) return '';
+  return `<div class="avv"><b>🔔 ${n.length} ${n.length == 1 ? 'nuova assenza' : 'nuove assenze'} dall'ultima visita</b>` +
+    n.slice(0, 15).map(x => `<div>• ${esc(nome(x.r.p))} – ${esc(x.e.title)} ${x.e.team == 'BIANCA' ? 'Bianca' : 'Rossa'}, ${dl(x.e.date)}</div>`).join('') +
+    (n.length > 15 ? `<div>…e altre ${n.length - 15}</div>` : '') + `<button data-seen style="margin-top:6px">Ho visto</button></div>`;
+}
 const addSel = (e, t, as) => {
   const got = new Set(as.map(r => r.p)), opts = D.players.filter(p => p.squadra == t && !got.has(p.n));
   return opts.length ? `<select data-addabs="${e.id}" style="margin-top:6px"><option value="">+ Segna assente…</option>${opts.map(p => `<option value="${p.n}">${esc(p.nome)}</option>`).join('')}</select>` : '';
@@ -357,7 +397,7 @@ function doRender() {
   $('#hr').innerHTML = admin ? `<button class="${!sv ? 'on' : ''}" data-t="ev">Genitore</button> <button class="${sv ? 'on' : ''}" data-t="adm">Staff</button> <button data-logout style="font-size:0.8rem">Cambia Profilo</button>` : `<button class="on" data-t="ev">Genitore</button> <button data-logout style="font-size:0.8rem">Cambia Profilo</button>`;
   
   const picked = !!squadra(me);
-  let h = sv ? '' : picked
+  let h = sv ? avvisoHTML() : picked
     ? `<div class="sel-box"><b>Giocatore selezionato:</b> ${esc(nome(me))} (${squadra(me)}) <button ${admin ? 'data-pick' : 'data-logout'} style="float:right;padding:2px 8px;font-size:0.8rem">Cambia</button></div>`
     : `<div class="sel-box"><b>Per quale giocatore segnali le assenze?</b><select id="adm_me"><option value="">Scegli il giocatore…</option>${D.players.map(p => `<option value="${p.n}">${esc(p.nome)} (${p.squadra})</option>`).join('')}</select></div>`;
   h += `<div class="row"><div><button class="${V().vw == 'w' ? 'on' : ''}" data-vw="w">Settimana</button> <button class="${V().vw == 'm' ? 'on' : ''}" data-vw="m">Mese</button></div>` +
@@ -593,6 +633,8 @@ document.body.onclick = async e => {
   const t = e.target;
   try {
     if (t.classList.contains('ov') || t.dataset.close !== undefined) closeModal();
+    else if (t.dataset.upd !== undefined) { location.replace(location.pathname + '?c=' + encodeURIComponent(code) + '&r=' + Date.now()); }
+    else if (t.dataset.seen !== undefined) { store.set('seen', String(Math.max(Date.now(), ...D.abs.map(r => r.ts || 0)))); render(); }
     else if (t.dataset.t) { tab = t.dataset.t; render(); }
     else if (t.dataset.loginType == 'staff') openModal('login_staff');
     else if (t.dataset.loginType == 'parent') openModal('login_parent');
@@ -643,7 +685,7 @@ document.body.onclick = async e => {
     else if (t.dataset.ev) {
       t.disabled = true;
       const note = t.parentElement.querySelector('.nt').value.trim(), ev = t.dataset.ev, id = ev + '__' + me;
-      if (t.dataset.st == 'A') await setDoc(ref('assenze', id), {ev, p: Number(me), note, ts: Date.now()});
+      if (t.dataset.st == 'A') await setDoc(ref('assenze', id), {ev, p: Number(me), note, ts: (ab(ev, me) || {}).ts || Date.now()});
       else await deleteDoc(ref('assenze', id));
       closeModal(); render();
     } else if (t.id == 'ea') {
@@ -687,7 +729,9 @@ document.body.onkeydown = e => {
 let hiddenAt = 0;
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) hiddenAt = Date.now();
-  else if (hiddenAt && Date.now() - hiddenAt > 5 * 60 * 1000) { hiddenAt = 0; closeModal(); resetView(); render(); }
+  else { checkUpdate(); }
+  if (!document.hidden && hiddenAt && Date.now() - hiddenAt > 5 * 60 * 1000) { hiddenAt = 0; closeModal(); resetView(); render(); }
 });
 checkAuto();
+checkUpdate();
 </script></body></html>

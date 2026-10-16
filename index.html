@@ -81,6 +81,10 @@ small{color:#666}
 .row>div:last-child{display:flex;flex-wrap:wrap;gap:6px}
 .btns{display:flex;flex-wrap:nowrap;gap:8px;margin:8px 0}
 .tag{display:inline-block;background:#555;color:#fff;border-radius:6px;padding:0 6px;font-size:.75rem;margin-left:4px}
+.summary-box{background:#fff;border-radius:12px;padding:12px;margin:12px 0;box-shadow:0 1px 3px #0001}
+.summary-box h4{margin:0 0 8px 0;color:var(--c1)}
+.summary-item{margin-bottom:8px;font-size:.9rem;border-bottom:1px solid #eee;padding-bottom:6px}
+.welcome-screen{display:flex;flex-direction:column;gap:12px;padding:10px 0}
 </style></head><body>
 <header><img id="logo" src="stemma.png" alt="" onerror="this.remove()">
 <h1><span class="t1">Concorezzese</span><span class="t2">Esordienti U12 · 2015</span><span class="t3">Gestione assenze</span></h1><div id="hr"></div></header>
@@ -88,7 +92,7 @@ small{color:#666}
 <div id="modal"></div>
 <script type="module">
 import {initializeApp} from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
-import {getFirestore, collection, doc, setDoc, addDoc, deleteDoc, getDoc, onSnapshot, writeBatch} from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import {getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, setDoc, addDoc, deleteDoc, getDoc, onSnapshot, writeBatch, query, where} from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 const FB = {
   apiKey: "AIzaSyBkIw4tdL9Lz8Rr1_kr7XzzVy1IQOs2ZCw",
@@ -98,11 +102,11 @@ const FB = {
   messagingSenderId: "531728262014",
   appId: "1:531728262014:web:30f6d602c16dcb25a0092f"
 };
-const INIZIO = '2026-09-01';   // inizio stagione (per il report)
+const INIZIO = '2026-09-01';
 
 const $ = s => document.querySelector(s);
 const main = $('#main'), mod = $('#modal');
-const store = {   // salva sul telefono in due modi (memoria del browser + cookie di 1 anno)
+const store = {
   get(k) { try { const v = localStorage.getItem(k); if (v !== null) return v; } catch (_) {} const m = document.cookie.match(new RegExp('(?:^|; )' + k + '=([^;]*)')); return m ? decodeURIComponent(m[1]) : ''; },
   set(k, v) { try { localStorage.setItem(k, v); } catch (_) {} document.cookie = k + '=' + encodeURIComponent(v) + ';max-age=31536000;path=' + location.pathname.replace(/[^/]*$/, '') + ';SameSite=Lax'; }
 };
@@ -112,12 +116,14 @@ if (Q.get('c')) store.set('c', Q.get('c'));
 const code = store.get('c');
 if (!code) { main.textContent = 'Usa il link ricevuto dalla società (quello con ?c=...).'; throw 0; }
 
-const db = getFirestore(initializeApp(FB));
+const fbApp = initializeApp(FB);
+let db;
+try { db = initializeFirestore(fbApp, {localCache: persistentLocalCache({tabManager: persistentMultipleTabManager()})}); }
+catch (_) { db = getFirestore(fbApp); }
 const col = n => collection(db, 's', code, n);
 const ref = (n, id) => doc(db, 's', code, n, id);
 const D = {players: [], extras: [], abs: [], mods: {}, pause: [], sched: null};
 let draft = null;
-// Calendario fisso predefinito (d: 0=dom, 1=lun ... 6=sab). Lo staff può cambiarlo dal pulsante "Calendario".
 const DEF = {versions: [{from: '2026-09-01', rules: {
   BIANCA: [{d: 2, t: '18:00–20:00', y: 'Allenamento'}, {d: 4, t: '18:30–20:00', y: 'Allenamento'}, {d: 6, t: '', y: 'Campionato'}],
   ROSSA: [{d: 2, t: '18:00–20:00', y: 'Allenamento'}, {d: 5, t: '18:00–19:30', y: 'Allenamento'}, {d: 6, t: '', y: 'Campionato'}]}}]};
@@ -128,7 +134,6 @@ const TIPI = ['Allenamento', 'Campionato', 'Amichevole', 'Torneo'];
 const kOf = t => t == 'Allenamento' ? 'A' : 'P';
 const now0 = new Date();
 let me = store.get('me'), tab = 'ev', admin = false, sel = null, selN = null;
-// Navigazione (settimana / mese / vista) separata per la vista genitore e per la vista staff
 const nav = {ev: {vw: 'w', wk: 0, mon: {y: now0.getFullYear(), m: now0.getMonth()}}, adm: {vw: 'w', wk: 0, mon: {y: now0.getFullYear(), m: now0.getMonth()}}};
 const V = () => nav[staffView() ? 'adm' : 'ev'];
 
@@ -138,17 +143,49 @@ const abb = t => ({Allenamento: 'Allen.', Campionato: 'Camp.', Amichevole: 'Amic
 const MESI = ['gennaio','febbraio','marzo','aprile','maggio','giugno','luglio','agosto','settembre','ottobre','novembre','dicembre'];
 const iso = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const nome = n => (D.players.find(x => x.n == n) || {}).nome || '?';
-const squadra = n => (D.players.find(x => x.n == n) || {}).squadra;
-const tot = t => D.players.filter(p => p.squadra == t).length;
+// Indici in memoria: evitano ricerche lineari ad ogni cella del calendario
+const IX = {pl: new Map(), ab: new Map(), byEv: new Map(), tot: {BIANCA: 0, ROSSA: 0}};
+function reindex() {
+  IX.pl = new Map(D.players.map(p => [Number(p.n), p]));
+  IX.tot = {BIANCA: 0, ROSSA: 0};
+  D.players.forEach(p => { if (p.squadra in IX.tot) IX.tot[p.squadra]++; });
+  IX.ab = new Map(); IX.byEv = new Map();
+  D.abs.forEach(r => {
+    IX.ab.set(r.ev + '__' + r.p, r);
+    if (!IX.byEv.has(r.ev)) IX.byEv.set(r.ev, []);
+    IX.byEv.get(r.ev).push(r);
+  });
+}
+const nome = n => (IX.pl.get(Number(n)) || {}).nome || '?';
+const squadra = n => (IX.pl.get(Number(n)) || {}).squadra;
+const tot = t => IX.tot[t] || 0;
+const absTeam = (ev, t) => (IX.byEv.get(ev) || []).filter(r => squadra(r.p) == t);
+const str = x => String(x ?? '').trim();
+const pad2 = n => String(n).padStart(2, '0');
+const serialDate = n => new Date(Math.round((n - 25569) * 86400000)).toISOString().slice(0, 10);
+const serialTime = f => { const m = Math.round((f % 1) * 1440); return pad2(Math.floor(m / 60) % 24) + ':' + pad2(m % 60); };
+async function sha(s) {
+  if (!(window.crypto && crypto.subtle)) throw new Error('Browser non supportato (serve HTTPS).');
+  const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
+}
+// PIN: nuovo formato = hash (pinh); formato vecchio = testo in chiaro (pin), ancora accettato
+async function pinOk(o, pin, who) {
+  if (o.pinh) return (await sha(code + ':' + who + ':' + pin)) === o.pinh;
+  return str(o.pin) === String(pin);
+}
+function downloadBlob(name, text) {
+  const u = URL.createObjectURL(new Blob([text], {type: 'text/csv;charset=utf-8'}));
+  const l = document.createElement('a'); l.href = u; l.download = name;
+  document.body.appendChild(l); l.click(); l.remove(); setTimeout(() => URL.revokeObjectURL(u), 3000);
+}
 const tag = e => e.canc ? `<span class="tag">ANNULLATO${e.pause ? ' · ' + esc(e.pause) : ''}</span>` : '';
 const ttl = e => esc(e.title) + (e.desc ? ' · ' + esc(e.desc) : '');
-const ab = (ev, p) => D.abs.find(r => r.ev == ev && r.p == p);
+const ab = (ev, p) => IX.ab.get(ev + '__' + Number(p));
 const staffView = () => admin && tab == 'adm';
 const dl = d => { const x = new Date(d + 'T12:00'); return GG[x.getDay()] + ' ' + x.getDate() + '/' + (x.getMonth() + 1); };
 
-// Calendario fisso: martedì entrambe 18-20, giovedì Bianca 18:30-20, venerdì Rossa 18-19:30, sabato partita
-function rulesFor(team, day) {   // regole valide in quel giorno (ultima versione con "valido dal" <= giorno)
+function rulesFor(team, day) {
   const v = SCHED().versions; let cur = v[0];
   v.forEach(x => { if (x.from <= day) cur = x; });
   return (cur.rules && cur.rules[team]) || [];
@@ -165,28 +202,37 @@ function recurring(from, to, team) {
   }
   return r;
 }
-function evs(team, a, b, wc) {   // wc = mostra anche gli eventi annullati (solo staff)
-  const A = iso(a), B = iso(b), r = [];
-  // giorni in cui questa squadra ha già una partita/torneo inserito a mano o da file: sostituisce il "Campionato" generico del sabato
-  const pg = D.extras.filter(x => x.date >= A && x.date <= B && (x.team == 'TUTTE' || x.team == team) && (x.k || kOf(x.title)) == 'P').map(x => x.date);
+const EVC = new Map();
+function allEvs(a, b) {
+  const A = iso(a), B = iso(b), key = A + '|' + B;
+  let r = EVC.get(key); if (r) return r;
+  if (EVC.size > 60) EVC.clear();
+  r = [];
+  const pg = {};
+  D.extras.forEach(x => { if (x.date >= A && x.date <= B && (x.k || kOf(x.title)) == 'P') (pg[x.date] ??= new Set()).add(x.team); });
+  const hasP = (date, team) => { const s = pg[date]; return !!s && (s.has('TUTTE') || s.has(team)); };
   ['BIANCA', 'ROSSA'].forEach(t => recurring(a, b, t).forEach(e => {
     const o = D.mods[e.id];
-    if (!o && e.k == 'P' && pg.includes(e.date)) return;
+    if (!o && e.k == 'P' && hasP(e.date, e.team)) return;
     if (o) { if (o.time !== undefined) e.time = o.time; if (o.title) e.title = o.title; if (o.team) e.team = o.team; e.desc = o.desc || ''; if (o.cancel) e.canc = 1; }
     e.k = kOf(e.title);
     const p = D.pause.find(z => z.from <= e.date && e.date <= z.to && (z.team == 'TUTTE' || z.team == e.team) && (z.what == 'Tutto' || (z.what == 'Allenamenti' ? e.k == 'A' : e.k == 'P')));
     if (p) { e.canc = 1; e.pause = p.note || 'pausa'; }
-    if (e.team == team && (!e.canc || wc)) r.push(e);
+    r.push(e);
   }));
-  D.extras.forEach(x => { if (x.date >= A && x.date <= B && (x.team == 'TUTTE' || x.team == team)) r.push({id: x.id, date: x.date, time: x.time || '', team, tm: x.team, k: x.k || kOf(x.title), title: x.title, desc: x.desc || '', x: 1}); });
-  return r.sort((p, q) => (p.date + p.time).localeCompare(q.date + q.time));
+  D.extras.forEach(x => {
+    if (x.date < A || x.date > B) return;
+    ['BIANCA', 'ROSSA'].forEach(t => { if (x.team == 'TUTTE' || x.team == t) r.push({id: x.id, date: x.date, time: x.time || '', team: t, tm: x.team, k: x.k || kOf(x.title), title: x.title, desc: x.desc || '', x: 1}); });
+  });
+  r.sort((p, q) => (p.date + p.time).localeCompare(q.date + q.time));
+  EVC.set(key, r); return r;
 }
+const evs = (team, a, b, wc) => allEvs(a, b).filter(e => e.team == team && (wc || !e.canc));
 function range() {
   const n = new Date(); n.setHours(0,0,0,0);
   const m = new Date(n); m.setDate(n.getDate() - ((n.getDay() + 6) % 7) + 7 * V().wk);
   const e = new Date(m); e.setDate(m.getDate() + 6); return [m, e];
 }
-// data -> {BIANCA:[eventi], ROSSA:[eventi]}   (Bianca sempre sopra, Rossa sotto)
 function dayMap(a, b) {
   const m = {}, teams = staffView() ? ['BIANCA', 'ROSSA'] : [squadra(me)];
   teams.forEach(t => evs(t, a, b, staffView()).forEach(e => { (m[e.date] ??= {BIANCA: [], ROSSA: []})[t].push(e); }));
@@ -196,11 +242,35 @@ function dayMap(a, b) {
 function block(e, t, sv) {
   const head = `<span class="${e.canc ? 'canc' : ''}"><b>${esc(e.time) || '—'}</b><br>${ttl(e)}</span>${tag(e)}`;
   if (sv) {
-    const n = D.abs.filter(r => r.ev == e.id && squadra(r.p) == t).length;
+    const n = absTeam(e.id, t).length;
     return `<div class="blk ${t}"><b>${t == 'BIANCA' ? 'Bianca' : 'Rossa'}</b> · ${head}<br><span class="${n ? 'bad' : ''}">${n} assenti su ${tot(t)}</span></div>`;
   }
   return `<div class="blk ${t}">${head}</div>`;
 }
+
+function staffSummaryHTML(m) {
+  const ds = Object.keys(m).sort();
+  let eventsList = [];
+  ds.forEach(d => {
+    ['BIANCA', 'ROSSA'].forEach(t => {
+      m[d][t].forEach(e => {
+        const as = absTeam(e.id, t).sort((p, q) => nome(p.p).localeCompare(nome(q.p)));
+        eventsList.push({e, t, d, as});
+      });
+    });
+  });
+  if (!eventsList.length) return '';
+  return `<div class="summary-box">
+    <h4>📋 Sintesi assenze ${V().vw == 'w' ? 'della settimana' : 'del mese'}</h4>
+    ${eventsList.map(item => `
+      <div class="summary-item">
+        <b>${dl(item.d)} (${item.t})</b> - ${esc(item.e.time) || '—'} ${ttl(item.e)}<br>
+        <span class="${item.as.length ? 'bad' : ''}">Assenti (${item.as.length}/${tot(item.t)}):</span> ${item.as.length ? item.as.map(r => esc(nome(r.p)) + (r.note ? ` (${esc(r.note)})` : '')).join(', ') : 'Nessuna assenza'}
+      </div>
+    `).join('')}
+  </div>`;
+}
+
 function weekHTML(m) {
   const ds = Object.keys(m).sort(), sv = staffView(), td = iso(new Date());
   if (!ds.length) return '<p>Nessun evento in questa settimana.</p>';
@@ -208,8 +278,11 @@ function weekHTML(m) {
     const x = ab(e.id, me);
     return `<div class="ev ${e.team}${x ? ' ass' : ''}" data-day="${e.date}"><div class="dh">${dl(e.date)}</div><b>${esc(e.time) || '—'}</b><br>${ttl(e)}${x ? '<div class="abs"><span class="ico">✖</span> Assente</div>' : ''}</div>`;
   }).join('') + '</div>';
-  return '<div class="strip">' + ds.map(d => `<div class="col${sv && d == sel ? ' sel' : ''}${d == td ? ' today' : ''}" data-day="${d}"><div class="dh">${dl(d)}</div>` +
+  
+  let html = '<div class="strip">' + ds.map(d => `<div class="col${sv && d == sel ? ' sel' : ''}${d == td ? ' today' : ''}" data-day="${d}"><div class="dh">${dl(d)}</div>` +
     ['BIANCA', 'ROSSA'].map(t => m[d][t].map(e => block(e, t, sv)).join('')).join('') + '</div>').join('') + '</div>';
+  html += staffSummaryHTML(m);
+  return html;
 }
 function navHTML() {
   if (V().vw == 'w') {
@@ -236,32 +309,54 @@ function monthHTML(m) {
   }
   const leg = staffView() ? `<span class="sw" style="background:var(--bianca)"></span>Bianca <span class="sw" style="background:var(--rossa)"></span>Rossa`
     : `<span class="sw" style="background:var(--${squadra(me) == 'ROSSA' ? 'rossa' : 'bianca'})"></span>giorno con evento · ✖ = assente`;
-  return h + `</div><p class="leg">${leg}</p>`;
+  let html = h + `</div><p class="leg">${leg}</p>`;
+  if (sv) html += staffSummaryHTML(m);
+  return html;
 }
 function detail() {
   if (!sel) return '';
   const d = new Date(sel + 'T12:00'); let h = `<h3>${dl(sel)}</h3>`;
   ['BIANCA', 'ROSSA'].forEach(t => evs(t, d, d, true).forEach(e => {
-    const as = D.abs.filter(r => r.ev == e.id && squadra(r.p) == t).sort((p, q) => nome(p.p).localeCompare(nome(q.p)));
+    const as = absTeam(e.id, t).sort((p, q) => nome(p.p).localeCompare(nome(q.p)));
     const open = as.find(r => selN == e.id + '__' + r.p);
     h += `<div class="card ${t}"><div><b>${t == 'BIANCA' ? 'Bianca' : 'Rossa'}</b> · <span class="${e.canc ? 'canc' : ''}">${esc(e.time)} ${ttl(e)}</span>${tag(e)}</div>
       <div class="btns"><button data-edit="${e.id}">Modifica</button>${e.x ? `<button data-del="${e.id}">Elimina</button>` : (e.pause ? '' : `<button data-canc="${e.id}">${e.canc ? 'Ripristina' : 'Annulla'}</button>`)}</div>
       <span class="cnt ${as.length ? 'bad' : ''}">${as.length} assenti su ${tot(t)}</span><div class="chips">${as.length ? as.map(r => `<button class="chip${open == r ? ' on' : ''}" data-n="${e.id}__${r.p}">✖ ${esc(nome(r.p))}</button>`).join('') : 'nessuna assenza'}</div>
       ${open ? `<div class="nota"><b>${esc(nome(open.p))}</b>: ${esc(open.note) || 'nessuna nota'}</div>` : ''}</div>`;
   }));
-  return h + `<p><button data-logout>Esci dall'area staff</button></p>`;
+  return h + `<p><button data-logout>Cambia profilo / Esci</button></p>`;
 }
 
-function render() {
-  if (document.activeElement && document.activeElement.id == 'pl') return;
+let rafId = 0, playersReady = false;
+function render() { if (!rafId) rafId = requestAnimationFrame(() => { rafId = 0; doRender(); }); }
+function doRender() {
+  syncAbs();
+  if (!playersReady) { main.textContent = 'Caricamento…'; return; }
+  const hasUser = store.get('autenticato') === '1' && (admin || (me && squadra(me)));
+  if (!hasUser) {
+    $('#hr').innerHTML = '';
+    main.innerHTML = `<div class="welcome-screen">
+      <h3>Benvenuto in Gestione Assenze</h3>
+      <p>Per motivi di privacy, seleziona il tuo tipo di accesso:</p>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-top:15px">
+        <button class="pri" data-login-type="staff" style="padding:14px;font-size:1.1rem">Accedi come Staff</button>
+        <button data-login-type="parent" style="padding:14px;font-size:1.1rem">Accedi come Genitore</button>
+      </div>
+    </div>`;
+    return;
+  }
+
   const sv = staffView();
-  $('#hr').innerHTML = admin ? `<button class="${!sv ? 'on' : ''}" data-t="ev">Genitore</button> <button class="${sv ? 'on' : ''}" data-t="adm">Staff</button>` : `<button class="on" data-t="ev">Genitore</button> <button id="st">Staff</button>`;
-  const ICON = '<svg viewBox="0 0 32 32"><circle cx="16" cy="6.5" r="4.5"/><path d="M9 13.5l5-3h4l5 3 2.5 6.5-4 1.5V30H10.5V21.5L6.5 20z"/><circle cx="27" cy="27" r="3.2"/></svg>';
-  let h = sv ? '' : `<div class="sel-box"><div class="lab">${ICON} Seleziona giocatore</div><select id="pl"><option value="">Scegli il giocatore…</option>${D.players.map(p => `<option value="${p.n}" ${p.n == me ? 'selected' : ''}>${esc(p.nome)}</option>`).join('')}</select>${squadra(me) ? '<small class="okm">✓ Ricordato su questo telefono · puoi cambiarlo quando vuoi</small>' : ''}</div>`;
+  $('#hr').innerHTML = admin ? `<button class="${!sv ? 'on' : ''}" data-t="ev">Genitore</button> <button class="${sv ? 'on' : ''}" data-t="adm">Staff</button> <button data-logout style="font-size:0.8rem">Cambia Profilo</button>` : `<button class="on" data-t="ev">Genitore</button> <button data-logout style="font-size:0.8rem">Cambia Profilo</button>`;
+  
+  const picked = !!squadra(me);
+  let h = sv ? '' : picked
+    ? `<div class="sel-box"><b>Giocatore selezionato:</b> ${esc(nome(me))} (${squadra(me)}) <button ${admin ? 'data-pick' : 'data-logout'} style="float:right;padding:2px 8px;font-size:0.8rem">Cambia</button></div>`
+    : `<div class="sel-box"><b>Per quale giocatore segnali le assenze?</b><select id="adm_me"><option value="">Scegli il giocatore…</option>${D.players.map(p => `<option value="${p.n}">${esc(p.nome)} (${p.squadra})</option>`).join('')}</select></div>`;
   h += `<div class="row"><div><button class="${V().vw == 'w' ? 'on' : ''}" data-vw="w">Settimana</button> <button class="${V().vw == 'm' ? 'on' : ''}" data-vw="m">Mese</button></div>` +
     (sv ? `<div><button class="pri" data-m="add">+ Evento</button> <button data-m="rep">⬇ Report</button> <button data-m="cal">Calendario</button> <button data-m="pl">Giocatori</button></div>` : '') + '</div>';
   if (!D.players.length) h += sv ? '<p>Nessun giocatore: caricali con il pulsante "Giocatori".</p>' : '<p>Elenco giocatori non ancora caricato.</p>';
-  else if (!sv && !squadra(me)) h += '<p>Scegli il giocatore per vedere gli eventi.</p>';
+  else if (!sv && !picked) { /* attende la scelta del giocatore */ }
   else {
     const [a, b] = V().vw == 'w' ? range() : [new Date(V().mon.y, V().mon.m, 1), new Date(V().mon.y, V().mon.m + 1, 0)];
     const m = dayMap(a, b);
@@ -281,7 +376,7 @@ function openModal(k, d) {
       const x = ab(e.id, me);
       h += `<div class="card ${e.team} ${x ? 'ass' : ''}"><b>${esc(e.time) || '—'}</b> · ${ttl(e)}${x ? ' — <b>ASSENTE</b>' : ''}<br>
         <input class="nt" maxlength="200" placeholder="Motivo / note (facoltativo)" value="${esc(x ? x.note : '')}">
-        ${x ? `<button class="pri" data-ev="${e.id}" data-st="A">Aggiorna nota</button> <button data-ev="${e.id}" data-st="OK">Sarà presente</button>`
+        ${x ? `<button class="pri" data-ev="${e.id}" data-st="A">Aggiorna nota</button> <button data-ev="${e.id}" data-st="OK" style="background:#c71525;color:#fff">Elimina assenza</button>`
             : `<button class="pri" data-ev="${e.id}" data-st="A">Segnala assenza</button>`}</div>`;
     });
   } else if (k == 'add') h = `<h3>Aggiungi evento extra</h3><small>Data</small><input type="date" id="ed"><small>Orario</small><input id="et" placeholder="es. 10:00–12:00">
@@ -302,13 +397,17 @@ function openModal(k, d) {
       <button class="pri" data-save="${e.id}" data-x="${e.x ? 1 : 0}">Salva</button>${e.x ? '' : ` <button data-reset="${e.id}">Ripristina predefinito</button>`}`;
   }
   else if (k == 'cal') { initDraft(); h = calHTML(); }
-  else if (k == 'pin') h = `<h3>Area staff</h3><p>${cfg === false ? 'Prima volta: scegli un PIN (almeno 4 caratteri).' : 'Inserisci il PIN.'}</p>
-    <input type="password" id="pin" autocomplete="off" placeholder="PIN"><small id="perr" class="bad"></small><br><button class="pri" id="pok">Entra</button>`;
+  else if (k == 'login_staff') h = `<h3>Accesso Staff</h3><p>${cfg === false ? 'Prima volta: crea un PIN per lo staff (almeno 4 caratteri).' : 'Inserisci il PIN staff.'}</p>
+    <input type="password" id="pin" autocomplete="off" placeholder="PIN Staff"><small id="perr" class="bad"></small><br><button class="pri" id="pok">Entra</button>`;
+  else if (k == 'login_parent') h = `<h3>Accesso Genitore</h3><p>Seleziona il giocatore e inserisci il PIN dedicato:</p>
+    <small>Giocatore</small><select id="sel_p"><option value="">Scegli il giocatore…</option>${D.players.map(p => `<option value="${p.n}">${esc(p.nome)} (${p.squadra})</option>`).join('')}</select>
+    <small>PIN Giocatore (4 cifre)</small><input type="password" id="ppin" autocomplete="off" placeholder="PIN a 4 cifre"><small id="perr" class="bad"></small><br><button class="pri" id="ppok">Entra</button>`;
   else if (k == 'rep') h = `<h3>Report presenze</h3><small>Dal</small><input type="date" id="rf" value="${INIZIO}"><small>Al</small><input type="date" id="rt" value="${iso(new Date())}">
     <button class="pri" id="dr">⬇ Scarica CSV (Excel)</button><p><small>Conta solo gli eventi già trascorsi. Chi non ha segnalato assenza risulta presente.</small></p>`;
-  else if (k == 'pl') h = `<h3>Elenco giocatori</h3><p>${D.players.length} giocatori caricati. Per caricarli o aggiornarli scegli il file (CSV o Excel) con le colonne n;nome;squadra:</p><input type="file" id="csv" accept=".csv,.xlsx,.xls,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel">`;
+  else if (k == 'pl') h = `<h3>Elenco giocatori e PIN</h3><p>${D.players.length} giocatori caricati. Per caricarli o aggiornarli scegli il file (CSV o Excel) con le colonne n;nome;squadra;pin:</p><input type="file" id="csv" accept=".csv,.xlsx,.xls,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel">`;
   mod.innerHTML = wrap(h);
-  if (k == 'pin') $('#pin').focus();
+  if (k == 'login_staff') $('#pin').focus();
+  if (k == 'login_parent') $('#ppin').focus();
 }
 const closeModal = () => { mod.innerHTML = ''; };
 function initDraft() {
@@ -354,15 +453,13 @@ function parseDate(x) {
   return m ? `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}` : null;
 }
 function templateCsv() {
-  const csv = '\ufeffdata;orario;squadra;tipo;dettagli\n2026-11-07;15:00;BIANCA;Campionato;vs Esempio Calcio\n2026-11-07;16:30;ROSSA;Campionato;vs Altra Squadra\n2026-11-14;10:00–12:00;TUTTE;Torneo;Torneo di esempio\n2026-11-15;10:30;BIANCA;Amichevole;\n';
-  const l = document.createElement('a');
-  l.href = URL.createObjectURL(new Blob([csv], {type: 'text/csv'})); l.download = 'eventi_modello.csv'; l.click();
+  const csv = '\uFEFFdata;orario;squadra;tipo;dettagli\n' +
+    '2026-11-07;15:00;BIANCA;Campionato;vs Esempio Calcio\n' +
+    '2026-11-07;16:30;ROSSA;Campionato;vs Altra Squadra\n' +
+    '2026-11-14;10:00–12:00;TUTTE;Torneo;Torneo di esempio\n' +
+    '2026-11-15;10:30;BIANCA;Amichevole;\n';
+  downloadBlob('eventi_modello.csv', csv);
 }
-// ----- lettura file CSV / Excel -----
-const str = c => String(c ?? '').trim().replace(/^"|"$/g, '');
-const pad2 = n => String(n).padStart(2, '0');
-const serialDate = n => { const d = new Date(Date.UTC(1899, 11, 30) + Math.floor(n) * 864e5); return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate()); };
-const serialTime = n => { const m = Math.round((n % 1) * 1440); return pad2(Math.floor(m / 60) % 24) + ':' + pad2(m % 60); };
 let xlsxP;
 const loadXLSX = () => xlsxP || (xlsxP = new Promise((ok, ko) => {
   if (window.XLSX) return ok(window.XLSX);
@@ -371,12 +468,12 @@ const loadXLSX = () => xlsxP || (xlsxP = new Promise((ok, ko) => {
   sc.onload = () => ok(window.XLSX); sc.onerror = () => { xlsxP = null; ko(new Error('Impossibile caricare il lettore Excel: controlla la connessione.')); };
   document.head.appendChild(sc);
 }));
-async function readRows(file) {   // righe come liste di celle: da CSV (; o ,) oppure dal primo foglio di un file Excel
+async function readRows(file) {
   if (/\.xlsx?$/i.test(file.name)) {
     const X = await loadXLSX(), wb = X.read(await file.arrayBuffer(), {type: 'array'});
     return X.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header: 1, raw: true, defval: ''});
   }
-  const lines = (await file.text()).replace(/^\ufeff/, '').split(/\r?\n/).filter(l => l.trim());
+  const lines = (await file.text()).replace(/^\uFEFF/, '').split(/\r?\n/).filter(l => l.trim());
   const sep = lines[0] && lines[0].includes(';') ? ';' : ',';
   return lines.map(l => l.split(sep));
 }
@@ -391,9 +488,9 @@ async function importEvents(rows) {
   if (!rows.length) return alert('File vuoto.');
   const ok = [], bad = [];
   rows.forEach((c, i) => {
-    if (!c.some(x => str(x))) return;   // riga vuota
+    if (!c.some(x => str(x))) return;
     const date = typeof c[0] == 'number' ? serialDate(c[0]) : parseDate(str(c[0]));
-    if (!date) { if (i > 0) bad.push(i + 1); return; }   // la prima riga (intestazione) viene saltata
+    if (!date) { if (i > 0) bad.push(i + 1); return; }
     const time = typeof c[1] == 'number' ? serialTime(c[1]) : str(c[1]), team = str(c[2]).toUpperCase(), title = TMAP[str(c[3]).toLowerCase()];
     if (!['BIANCA', 'ROSSA', 'TUTTE'].includes(team) || !title) { bad.push(i + 1); return; }
     ok.push({date, time, team, k: kOf(title), title, desc: str(c[4])});
@@ -407,22 +504,32 @@ async function importEvents(rows) {
   closeModal(); alert(ok.length + ' eventi caricati.' + (bad.length ? ' Righe ignorate, da controllare: ' + bad.join(', ') + '.' : ''));
 }
 function report(from, to) {
-  const today = new Date(); today.setHours(12,0,0,0);
+  const today = new Date(); today.setHours(12, 0, 0, 0);
   const A = new Date(from + 'T12:00'); let B = new Date(to + 'T12:00'); if (B > today) B = today;
   if (isNaN(A) || isNaN(B) || A > B) return alert('Intervallo di date non valido.');
-  let csv = '\ufeffGiocatore;Squadra;Allenamenti;Assenze allenamenti;Partite;Assenze partite;% presenza\n';
+  const E = {BIANCA: evs('BIANCA', A, B), ROSSA: evs('ROSSA', A, B)};   // calcolati una volta per squadra
+  let csv = '\uFEFFGiocatore;Squadra;Allenamenti;Assenze allenamenti;Partite;Assenze partite;% presenza\n';
   D.players.forEach(p => {
     let ta = 0, aa = 0, tp = 0, ap = 0;
-    evs(p.squadra, A, B).forEach(e => { const x = ab(e.id, p.n) ? 1 : 0; if (e.k == 'P') { tp++; ap += x; } else { ta++; aa += x; } });
+    (E[p.squadra] || []).forEach(e => { const x = ab(e.id, p.n) ? 1 : 0; if (e.k == 'P') { tp++; ap += x; } else { ta++; aa += x; } });
     const t = ta + tp, pct = t ? Math.round(100 * (t - aa - ap) / t) : '';
-    csv += `"${p.nome}";${p.squadra};${ta};${aa};${tp};${ap};${pct}\n`;
+    csv += `"${String(p.nome).replace(/"/g, '""')}";${p.squadra};${ta};${aa};${tp};${ap};${pct}\n`;
   });
-  const l = document.createElement('a');
-  l.href = URL.createObjectURL(new Blob([csv], {type: 'text/csv'}));
-  l.download = `report_presenze_${from}_${iso(B)}.csv`; l.click();
+  downloadBlob(`report_presenze_${from}_${iso(B)}.csv`, csv);
 }
-let cfg = null;   // PIN staff dal database: {pin} | false (non ancora creato) | null (non ancora letto)
-function checkAuto() { const p = store.get('pin'); if (!admin && p && cfg && cfg.pin === p) { admin = true; tab = 'adm'; render(); } }
+let cfg = null;
+function checkAuto() {
+  const aut = store.get('autenticato');
+  if (aut === '1') {
+    const savedAdmin = store.get('admin') === '1';
+    const savedMe = store.get('me');
+    if (savedAdmin) {
+      admin = true; tab = 'adm'; render();
+    } else if (savedMe) {
+      me = savedMe; admin = false; tab = 'ev'; render();
+    }
+  }
+}
 async function submitPin() {
   const pin = $('#pin').value.trim(), err = $('#perr');
   if (!pin) return;
@@ -430,23 +537,45 @@ async function submitPin() {
     if (cfg === null) { const s = await getDoc(ref('config', 'staff')); cfg = s.exists() ? s.data() : false; }
     if (cfg === false) {
       if (pin.length < 4) { err.textContent = 'Il PIN deve avere almeno 4 caratteri.'; return; }
-      await setDoc(ref('config', 'staff'), {pin}); cfg = {pin};
-    } else if (cfg.pin !== pin) { err.textContent = 'PIN errato, riprova.'; return; }
+      const pinh = await sha(code + ':staff:' + pin);
+      await setDoc(ref('config', 'staff'), {pinh}); cfg = {pinh};
+    } else if (!(await pinOk(cfg, pin, 'staff'))) { err.textContent = 'PIN errato, riprova.'; return; }
+    else if (!cfg.pinh) { const pinh = await sha(code + ':staff:' + pin); await setDoc(ref('config', 'staff'), {pinh}); cfg = {pinh}; }
   } catch (_) { err.textContent = 'Connessione assente, riprova.'; return; }
-  store.set('pin', pin); admin = true; tab = 'adm'; closeModal(); render();
+  store.set('admin', '1'); store.set('autenticato', '1'); admin = true; tab = 'adm'; closeModal(); render();
+}
+
+async function submitParentPin() {
+  const pId = $('#sel_p').value, pin = $('#ppin').value.trim(), err = $('#perr');
+  if (!pId) { err.textContent = 'Seleziona un giocatore.'; return; }
+  if (!pin) { err.textContent = 'Inserisci il PIN.'; return; }
+  const player = D.players.find(x => String(x.n) === String(pId));
+  if (!player) { err.textContent = 'Giocatore non trovato.'; return; }
+  let ok = false;
+  try { ok = await pinOk(player, pin, 'p' + player.n); } catch (_) { err.textContent = 'Errore di verifica, riprova.'; return; }
+  if (!ok) { err.textContent = 'PIN errato per questo giocatore.'; return; }
+  me = player.n; store.set('me', me); store.set('admin', '0'); store.set('autenticato', '1');
+  admin = false; tab = 'ev'; closeModal(); render();
 }
 
 document.body.onchange = async e => {
-  if (e.target.id == 'pl') { me = e.target.value; store.set('me', me); e.target.blur(); render(); }
-  else if (e.target.id == 'ecsv' && e.target.files[0]) { try { await importEvents(await readRows(e.target.files[0])); } catch (err) { alert('Errore: ' + (err.message || err)); } }
-  else if (e.target.id == 'csv' && e.target.files[0]) {
+  const f = e.target.files && e.target.files[0];
+  if (e.target.id == 'adm_me') { me = Number(e.target.value) || ''; store.set('me', me); render(); }
+  else if (e.target.id == 'ecsv' && f) { try { await importEvents(await readRows(f)); } catch (err) { alert('Errore: ' + (err.message || err)); } e.target.value = ''; }
+  else if (e.target.id == 'csv' && f) {
     try {
-      const righe = (await readRows(e.target.files[0])).map(c => ({n: Number(c[0]), nome: str(c[1]), squadra: str(c[2]).toUpperCase()}))
-        .filter(r => r.n > 0 && r.nome && (r.squadra == 'BIANCA' || r.squadra == 'ROSSA'));
-      if (!righe.length) return alert('Nessun giocatore valido nel file (colonne: n;nome;squadra).');
+      const rows = await readRows(f), righe = [], scartate = [];
+      for (const [i, c] of rows.entries()) {
+        const n = Number(c[0]), nome = str(c[1]), squadra = str(c[2]).toUpperCase(), pin = str(c[3]).padStart(4, '0');
+        if (!(n > 0) || !nome) continue;   // intestazione o riga vuota
+        if (!['BIANCA', 'ROSSA'].includes(squadra) || pin.length < 4) { scartate.push(i + 1); continue; }
+        righe.push({n, nome, squadra, pinh: await sha(code + ':p' + n + ':' + pin)});
+      }
+      if (!righe.length) return alert('Nessun giocatore valido nel file (colonne: n;nome;squadra;pin).');
       const wb = writeBatch(db); righe.forEach(r => wb.set(ref('giocatori', String(r.n)), r)); await wb.commit();
-      closeModal(); alert(righe.length + ' giocatori caricati.');
+      closeModal(); alert(righe.length + ' giocatori caricati con successo.' + (scartate.length ? ' Righe ignorate: ' + scartate.join(', ') + '.' : ''));
     } catch (err) { alert('Errore: ' + (err.message || err)); }
+    e.target.value = '';
   }
 };
 document.body.onclick = async e => {
@@ -454,8 +583,10 @@ document.body.onclick = async e => {
   try {
     if (t.classList.contains('ov') || t.dataset.close !== undefined) closeModal();
     else if (t.dataset.t) { tab = t.dataset.t; render(); }
-    else if (t.id == 'st') openModal('pin');
+    else if (t.dataset.loginType == 'staff') openModal('login_staff');
+    else if (t.dataset.loginType == 'parent') openModal('login_parent');
     else if (t.id == 'pok') await submitPin();
+    else if (t.id == 'ppok') await submitParentPin();
     else if (t.dataset.vw) { V().vw = t.dataset.vw; render(); }
     else if (t.dataset.wk) { V().wk += Number(t.dataset.wk); render(); }
     else if (t.dataset.cur !== undefined) { V().wk = 0; V().mon = {y: now0.getFullYear(), m: now0.getMonth()}; render(); }
@@ -484,7 +615,11 @@ document.body.onclick = async e => {
     else if (t.dataset.m) openModal(t.dataset.m);
     else if (t.dataset.n) { selN = selN == t.dataset.n ? null : t.dataset.n; render(); }
     else if (t.dataset.edit) openModal('edit', t.dataset.edit);
-    else if (t.dataset.logout !== undefined) { store.set('pin', ''); admin = false; tab = 'ev'; render(); }
+    else if (t.dataset.pick !== undefined) { me = ''; store.set('me', ''); render(); }
+    else if (t.dataset.logout !== undefined) { 
+      store.set('autenticato', ''); store.set('admin', ''); store.set('me', '');
+      admin = false; me = ''; tab = 'ev'; render(); 
+    }
     else if (t.dataset.save) {
       const id = t.dataset.save, o = {time: $('#mt').value.trim(), title: $('#my').value, team: $('#mq').value, desc: $('#md').value.trim()};
       if (t.dataset.x == '1') await setDoc(ref('eventi', id), {...o, k: kOf(o.title)}, {merge: true});
@@ -508,16 +643,33 @@ document.body.onclick = async e => {
       const c = t.closest('[data-day]');
       if (c) { if (staffView()) { sel = c.dataset.day; selN = null; render(); } else openModal('day', c.dataset.day); }
     }
-  } catch (err) { alert('Errore: ' + (err.message || err)); render(); }
+  } catch (err) { if (t && t.tagName == 'BUTTON') t.disabled = false; alert('Errore: ' + (err.message || err)); render(); }
 };
 
 const fail = () => { main.textContent = 'Impossibile caricare i dati. Controlla la connessione e il link.'; };
-onSnapshot(col('giocatori'), s => { D.players = s.docs.map(d => d.data()).sort((a, b) => a.nome.localeCompare(b.nome)); render(); }, fail);
-onSnapshot(col('eventi'), s => { D.extras = s.docs.map(d => ({id: d.id, ...d.data()})); render(); }, fail);
-onSnapshot(col('modifiche'), s => { D.mods = {}; s.docs.forEach(d => { D.mods[d.id] = d.data(); }); render(); }, fail);
-onSnapshot(col('pause'), s => { D.pause = s.docs.map(d => ({id: d.id, ...d.data()})); render(); }, fail);
-onSnapshot(ref('config', 'schedule'), s => { D.sched = s.exists() ? s.data() : null; render(); }, () => {});
-onSnapshot(col('assenze'), s => { D.abs = s.docs.map(d => d.data()); render(); }, fail);
+const dataChanged = () => { EVC.clear(); render(); };
+onSnapshot(col('giocatori'), s => { D.players = s.docs.map(d => d.data()).sort((a, b) => a.nome.localeCompare(b.nome)); reindex(); playersReady = true; render(); }, fail);
+onSnapshot(col('eventi'), s => { D.extras = s.docs.map(d => ({id: d.id, ...d.data()})); dataChanged(); }, fail);
+onSnapshot(col('modifiche'), s => { D.mods = {}; s.docs.forEach(d => { D.mods[d.id] = d.data(); }); dataChanged(); }, fail);
+onSnapshot(col('pause'), s => { D.pause = s.docs.map(d => ({id: d.id, ...d.data()})); dataChanged(); }, fail);
+onSnapshot(ref('config', 'schedule'), s => { D.sched = s.exists() ? s.data() : null; dataChanged(); }, () => {});
 onSnapshot(ref('config', 'staff'), s => { cfg = s.exists() ? s.data() : false; checkAuto(); }, () => {});
-document.body.onkeydown = e => { if (e.key == 'Enter' && e.target.id == 'pin') submitPin(); };
+
+// Assenze: lo staff le legge tutte, il genitore solo quelle del proprio figlio (meno letture Firestore)
+let unsubAbs = null, absMode = null;
+function syncAbs() {
+  const mode = store.get('autenticato') !== '1' ? '' : admin ? 'all' : me ? 'me:' + Number(me) : '';
+  if (mode === absMode) return;
+  absMode = mode; if (unsubAbs) { unsubAbs(); unsubAbs = null; }
+  D.abs = []; reindex();
+  if (!mode) return;
+  const q = mode === 'all' ? col('assenze') : query(col('assenze'), where('p', '==', Number(me)));
+  unsubAbs = onSnapshot(q, s => { D.abs = s.docs.map(d => d.data()); reindex(); render(); }, fail);
+}
+document.body.onkeydown = e => {
+  if (e.key == 'Escape') closeModal();
+  else if (e.key == 'Enter' && e.target.id == 'pin') submitPin();
+  else if (e.key == 'Enter' && e.target.id == 'ppin') submitParentPin();
+};
+checkAuto();
 </script></body></html>

@@ -83,6 +83,14 @@ small{color:#666}
 .tag{display:inline-block;background:#555;color:#fff;border-radius:6px;padding:0 6px;font-size:.75rem;margin-left:4px}
 .summary-box{background:#fff;border-radius:12px;padding:12px;margin:12px 0;box-shadow:0 1px 3px #0001}
 .summary-box h4{margin:0 0 8px 0;color:var(--c1)}
+.sh{font-weight:800;color:var(--c1);margin:14px 0 0}
+.sg{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin:8px 0 12px}
+.sc{background:#fff;border-radius:12px;padding:10px 12px;box-shadow:0 1px 3px #0001}
+.sc h4{margin:0 0 4px;color:var(--c1)}
+.si{padding:7px 0;border-top:1px solid #eee;font-size:.92rem;cursor:pointer;line-height:1.35}
+.tb{display:inline-block;border-radius:6px;padding:0 6px;font-size:.72rem;font-weight:800;vertical-align:1px}
+.tb.BIANCA{background:var(--bianca);color:#222}.tb.ROSSA{background:var(--rossa);color:#fff}
+.okk{color:#2e7d32}
 .summary-item{margin-bottom:8px;font-size:.9rem;border-bottom:1px solid #eee;padding-bottom:6px}
 .welcome-screen{display:flex;flex-direction:column;gap:12px;padding:10px 0}
 </style></head><body>
@@ -132,10 +140,15 @@ const DOW = ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Vener
 const dmy = x => x.slice(8) + '/' + x.slice(5, 7) + '/' + x.slice(0, 4);
 const TIPI = ['Allenamento', 'Campionato', 'Amichevole', 'Torneo'];
 const kOf = t => t == 'Allenamento' ? 'A' : 'P';
-const now0 = new Date();
+let now0 = new Date();
 let me = store.get('me'), tab = 'ev', admin = false, sel = null, selN = null;
 const nav = {ev: {vw: 'w', wk: 0, mon: {y: now0.getFullYear(), m: now0.getMonth()}}, adm: {vw: 'w', wk: 0, mon: {y: now0.getFullYear(), m: now0.getMonth()}}};
 const V = () => nav[staffView() ? 'adm' : 'ev'];
+function resetView() {   // ogni accesso riparte dalla settimana in corso
+  now0 = new Date();
+  ['ev', 'adm'].forEach(k => { nav[k] = {vw: 'w', wk: 0, mon: {y: now0.getFullYear(), m: now0.getMonth()}}; });
+  sel = null; selN = null;
+}
 
 const GG = ['dom','lun','mar','mer','gio','ven','sab'];
 const MES3 = ['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic'];
@@ -249,26 +262,16 @@ function block(e, t, sv) {
 }
 
 function staffSummaryHTML(m) {
-  const ds = Object.keys(m).sort();
-  let eventsList = [];
-  ds.forEach(d => {
-    ['BIANCA', 'ROSSA'].forEach(t => {
-      m[d][t].forEach(e => {
-        const as = absTeam(e.id, t).sort((p, q) => nome(p.p).localeCompare(nome(q.p)));
-        eventsList.push({e, t, d, as});
-      });
-    });
-  });
-  if (!eventsList.length) return '';
-  return `<div class="summary-box">
-    <h4>📋 Sintesi assenze ${V().vw == 'w' ? 'della settimana' : 'del mese'}</h4>
-    ${eventsList.map(item => `
-      <div class="summary-item">
-        <b>${dl(item.d)} (${item.t})</b> - ${esc(item.e.time) || '—'} ${ttl(item.e)}<br>
-        <span class="${item.as.length ? 'bad' : ''}">Assenti (${item.as.length}/${tot(item.t)}):</span> ${item.as.length ? item.as.map(r => esc(nome(r.p)) + (r.note ? ` (${esc(r.note)})` : '')).join(', ') : 'Nessuna assenza'}
-      </div>
-    `).join('')}
-  </div>`;
+  const A = [], P = [];
+  Object.keys(m).sort().forEach(d => ['BIANCA', 'ROSSA'].forEach(t => m[d][t].forEach(e => {
+    if (e.canc) return;
+    (e.k == 'A' ? A : P).push({e, t, d, as: absTeam(e.id, t).sort((p, q) => nome(p.p).localeCompare(nome(q.p)))});
+  })));
+  if (!A.length && !P.length) return '';
+  const item = x => `<div class="si" data-day="${x.d}"><b>${dl(x.d)}</b> <span class="tb ${x.t}">${x.t == 'BIANCA' ? 'Bianca' : 'Rossa'}</span> ${esc(x.e.title)}<br>` +
+    (x.as.length ? `<span class="bad">${x.as.length} assenti:</span> ${x.as.map(r => esc(nome(r.p))).join(', ')}` : '<span class="okk">✔ Nessuna assenza</span>') + '</div>';
+  const card = (title, list) => `<div class="sc"><h4>${title}</h4>${list.length ? list.map(item).join('') : '<div class="si" style="cursor:default">Nessun evento</div>'}</div>`;
+  return `<div class="sh">📋 Sintesi assenze della settimana</div><div class="sg">${card('🏃 Allenamenti', A)}${card('⚽ Partite e tornei', P)}</div>`;
 }
 
 function weekHTML(m) {
@@ -310,9 +313,12 @@ function monthHTML(m) {
   const leg = staffView() ? `<span class="sw" style="background:var(--bianca)"></span>Bianca <span class="sw" style="background:var(--rossa)"></span>Rossa`
     : `<span class="sw" style="background:var(--${squadra(me) == 'ROSSA' ? 'rossa' : 'bianca'})"></span>giorno con evento · ✖ = assente`;
   let html = h + `</div><p class="leg">${leg}</p>`;
-  if (sv) html += staffSummaryHTML(m);
   return html;
 }
+const addSel = (e, t, as) => {
+  const got = new Set(as.map(r => r.p)), opts = D.players.filter(p => p.squadra == t && !got.has(p.n));
+  return opts.length ? `<select data-addabs="${e.id}" style="margin-top:6px"><option value="">+ Segna assente…</option>${opts.map(p => `<option value="${p.n}">${esc(p.nome)}</option>`).join('')}</select>` : '';
+};
 function detail() {
   if (!sel) return '';
   const d = new Date(sel + 'T12:00'); let h = `<h3>${dl(sel)}</h3>`;
@@ -322,7 +328,8 @@ function detail() {
     h += `<div class="card ${t}"><div><b>${t == 'BIANCA' ? 'Bianca' : 'Rossa'}</b> · <span class="${e.canc ? 'canc' : ''}">${esc(e.time)} ${ttl(e)}</span>${tag(e)}</div>
       <div class="btns"><button data-edit="${e.id}">Modifica</button>${e.x ? `<button data-del="${e.id}">Elimina</button>` : (e.pause ? '' : `<button data-canc="${e.id}">${e.canc ? 'Ripristina' : 'Annulla'}</button>`)}</div>
       <span class="cnt ${as.length ? 'bad' : ''}">${as.length} assenti su ${tot(t)}</span><div class="chips">${as.length ? as.map(r => `<button class="chip${open == r ? ' on' : ''}" data-n="${e.id}__${r.p}">✖ ${esc(nome(r.p))}</button>`).join('') : 'nessuna assenza'}</div>
-      ${open ? `<div class="nota"><b>${esc(nome(open.p))}</b>: ${esc(open.note) || 'nessuna nota'}</div>` : ''}</div>`;
+      ${open ? `<div class="nota"><b>${esc(nome(open.p))}</b>: ${esc(open.note) || 'nessuna nota'}<br><button data-delabs="${e.id}__${open.p}" style="margin-top:6px;background:#c71525;color:#fff">Elimina assenza</button></div>` : ''}
+      ${addSel(e, t, as)}</div>`;
   }));
   return h + `<p><button data-logout>Cambia profilo / Esci</button></p>`;
 }
@@ -542,7 +549,7 @@ async function submitPin() {
     } else if (!(await pinOk(cfg, pin, 'staff'))) { err.textContent = 'PIN errato, riprova.'; return; }
     else if (!cfg.pinh) { const pinh = await sha(code + ':staff:' + pin); await setDoc(ref('config', 'staff'), {pinh}); cfg = {pinh}; }
   } catch (_) { err.textContent = 'Connessione assente, riprova.'; return; }
-  store.set('admin', '1'); store.set('autenticato', '1'); admin = true; tab = 'adm'; closeModal(); render();
+  store.set('admin', '1'); store.set('autenticato', '1'); admin = true; tab = 'adm'; resetView(); closeModal(); render();
 }
 
 async function submitParentPin() {
@@ -554,13 +561,17 @@ async function submitParentPin() {
   let ok = false;
   try { ok = await pinOk(player, pin, 'p' + player.n); } catch (_) { err.textContent = 'Errore di verifica, riprova.'; return; }
   if (!ok) { err.textContent = 'PIN errato per questo giocatore.'; return; }
-  me = player.n; store.set('me', me); store.set('admin', '0'); store.set('autenticato', '1');
+  resetView(); me = player.n; store.set('me', me); store.set('admin', '0'); store.set('autenticato', '1');
   admin = false; tab = 'ev'; closeModal(); render();
 }
 
 document.body.onchange = async e => {
   const f = e.target.files && e.target.files[0];
   if (e.target.id == 'adm_me') { me = Number(e.target.value) || ''; store.set('me', me); render(); }
+  else if (e.target.dataset.addabs) {
+    const ev = e.target.dataset.addabs, p = Number(e.target.value);
+    if (p) { try { await setDoc(ref('assenze', ev + '__' + p), {ev, p, note: '', ts: Date.now()}); selN = ev + '__' + p; } catch (err) { alert('Errore: ' + (err.message || err)); } }
+  }
   else if (e.target.id == 'ecsv' && f) { try { await importEvents(await readRows(f)); } catch (err) { alert('Errore: ' + (err.message || err)); } e.target.value = ''; }
   else if (e.target.id == 'csv' && f) {
     try {
@@ -618,7 +629,7 @@ document.body.onclick = async e => {
     else if (t.dataset.pick !== undefined) { me = ''; store.set('me', ''); render(); }
     else if (t.dataset.logout !== undefined) { 
       store.set('autenticato', ''); store.set('admin', ''); store.set('me', '');
-      admin = false; me = ''; tab = 'ev'; render(); 
+      admin = false; me = ''; tab = 'ev'; resetView(); render(); 
     }
     else if (t.dataset.save) {
       const id = t.dataset.save, o = {time: $('#mt').value.trim(), title: $('#my').value, team: $('#mq').value, desc: $('#md').value.trim()};
@@ -627,6 +638,7 @@ document.body.onclick = async e => {
       closeModal();
     }
     else if (t.dataset.reset) { await deleteDoc(ref('modifiche', t.dataset.reset)); closeModal(); }
+    else if (t.dataset.delabs) { if (confirm('Eliminare questa assenza?')) { await deleteDoc(ref('assenze', t.dataset.delabs)); selN = null; render(); } }
     else if (t.dataset.del) { if (confirm('Eliminare questo evento?')) await deleteDoc(ref('eventi', t.dataset.del)); }
     else if (t.dataset.ev) {
       t.disabled = true;
@@ -671,5 +683,11 @@ document.body.onkeydown = e => {
   else if (e.key == 'Enter' && e.target.id == 'pin') submitPin();
   else if (e.key == 'Enter' && e.target.id == 'ppin') submitParentPin();
 };
+// Se l'app resta in background più di 5 minuti, al rientro riparte dalla settimana corrente
+let hiddenAt = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) hiddenAt = Date.now();
+  else if (hiddenAt && Date.now() - hiddenAt > 5 * 60 * 1000) { hiddenAt = 0; closeModal(); resetView(); render(); }
+});
 checkAuto();
 </script></body></html>

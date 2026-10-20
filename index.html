@@ -118,7 +118,7 @@ const FB = {
 const INIZIO = '2026-09-01';
 
 const $ = s => document.querySelector(s);
-const APP_VERSION = '1.0';   // da cambiare ad ogni nuovo file caricato su GitHub
+const APP_VERSION = '1.1';   // da cambiare ad ogni nuovo file caricato su GitHub
 const main = $('#main'), mod = $('#modal');
 $('#ver').textContent = 'Versione ' + APP_VERSION;
 // Controlla in silenzio se su GitHub c'è una versione più recente della pagina
@@ -162,7 +162,7 @@ const dmy = x => x.slice(8) + '/' + x.slice(5, 7) + '/' + x.slice(0, 4);
 const TIPI = ['Allenamento', 'Campionato', 'Amichevole', 'Torneo'];
 const kOf = t => t == 'Allenamento' ? 'A' : 'P';
 let now0 = new Date();
-let me = store.get('me'), tab = 'ev', admin = false, sel = null, selN = null;
+let me = store.get('me'), tab = 'ev', admin = false, sel = null, selN = null, curDay = '';
 const nav = {ev: {vw: 'w', wk: 0, mon: {y: now0.getFullYear(), m: now0.getMonth()}}, adm: {vw: 'w', wk: 0, mon: {y: now0.getFullYear(), m: now0.getMonth()}}};
 const V = () => nav[staffView() ? 'adm' : 'ev'];
 function resetView() {   // ogni accesso riparte dalla settimana in corso
@@ -217,6 +217,8 @@ const tag = e => e.canc ? `<span class="tag">ANNULLATO${e.pause ? ' · ' + esc(e
 const ttl = e => esc(e.title) + (e.desc ? ' · ' + esc(e.desc) : '');
 const ab = (ev, p) => IX.ab.get(ev + '__' + Number(p));
 const staffView = () => admin && tab == 'adm';
+// I genitori possono modificare solo oggi e i giorni futuri; il passato è modificabile solo dallo staff
+const canEdit = d => admin || d >= iso(new Date());
 const dl = d => { const x = new Date(d + 'T12:00'); return GG[x.getDay()] + ' ' + x.getDate() + '/' + (x.getMonth() + 1); };
 
 function rulesFor(team, day) {
@@ -300,7 +302,7 @@ function weekHTML(m) {
   if (!ds.length) return '<p>Nessun evento in questa settimana.</p>';
   if (!sv) return '<div class="pgrid">' + ds.flatMap(d => m[d][squadra(me)]).map(e => {
     const x = ab(e.id, me);
-    return `<div class="ev ${e.team}${x ? ' ass' : ''}" data-day="${e.date}"><div class="dh">${dl(e.date)}</div><b>${esc(e.time) || '—'}</b><br>${ttl(e)}${x ? '<div class="abs"><span class="ico">✖</span> Assente</div>' : ''}</div>`;
+    return `<div class="ev ${e.team}${x ? ' ass' : ''}" data-day="${e.date}"><div class="dh">${dl(e.date)}${canEdit(e.date) ? '' : ' 🔒'}</div><b>${esc(e.time) || '—'}</b><br>${ttl(e)}${x ? '<div class="abs"><span class="ico">✖</span> Assente</div>' : ''}</div>`;
   }).join('') + '</div>';
   
   let html = '<div class="strip">' + ds.map(d => `<div class="col${sv && d == sel ? ' sel' : ''}${d == td ? ' today' : ''}" data-day="${d}"><div class="dh">${dl(d)}</div>` +
@@ -418,14 +420,19 @@ const wrap = h => `<div class="ov"><div class="mb"><button data-close style="flo
 function openModal(k, d) {
   let h = '';
   if (k == 'day') {
-    const dd = new Date(d + 'T12:00'); h = `<h3>${dl(d)}</h3>`;
+    const dd = new Date(d + 'T12:00'), ok = canEdit(d); curDay = d; h = `<h3>${dl(d)}</h3>`;
     evs(squadra(me), dd, dd).forEach(e => {
       const x = ab(e.id, me);
+      if (!ok) {   // giornata passata: solo consultazione
+        h += `<div class="card ${e.team} ${x ? 'ass' : ''}"><b>${esc(e.time) || '—'}</b> · ${ttl(e)}${x ? ' — <b>ASSENTE</b>' : ' — presente'}${x && x.note ? `<br><span class="nota">Nota: ${esc(x.note)}</span>` : ''}</div>`;
+        return;
+      }
       h += `<div class="card ${e.team} ${x ? 'ass' : ''}"><b>${esc(e.time) || '—'}</b> · ${ttl(e)}${x ? ' — <b>ASSENTE</b>' : ''}<br>
         <input class="nt" maxlength="200" placeholder="Motivo / note (facoltativo)" value="${esc(x ? x.note : '')}">
         ${x ? `<button class="pri" data-ev="${e.id}" data-st="A">Aggiorna nota</button> <button data-ev="${e.id}" data-st="OK" style="background:#c71525;color:#fff">Elimina assenza</button>`
             : `<button class="pri" data-ev="${e.id}" data-st="A">Segnala assenza</button>`}</div>`;
     });
+    if (!ok) h += '<p class="bad">🔒 Giornata passata: non si può più modificare. Per correzioni rivolgiti allo staff.</p>';
   } else if (k == 'add') h = `<h3>Aggiungi evento extra</h3><small>Data</small><input type="date" id="ed"><small>Orario</small><input id="et" placeholder="es. 10:00–12:00">
     <small>Squadra</small><select id="etm"><option>TUTTE</option><option>BIANCA</option><option>ROSSA</option></select>
     <small>Tipo</small><select id="ek">${TIPI.map(t => `<option>${t}</option>`).join('')}</select>
@@ -683,6 +690,7 @@ document.body.onclick = async e => {
     else if (t.dataset.delabs) { if (confirm('Eliminare questa assenza?')) { await deleteDoc(ref('assenze', t.dataset.delabs)); selN = null; render(); } }
     else if (t.dataset.del) { if (confirm('Eliminare questo evento?')) await deleteDoc(ref('eventi', t.dataset.del)); }
     else if (t.dataset.ev) {
+      if (!canEdit(curDay)) { closeModal(); return alert('Giornata passata: non è più modificabile. Rivolgiti allo staff.'); }
       t.disabled = true;
       const note = t.parentElement.querySelector('.nt').value.trim(), ev = t.dataset.ev, id = ev + '__' + me;
       if (t.dataset.st == 'A') await setDoc(ref('assenze', id), {ev, p: Number(me), note, ts: (ab(ev, me) || {}).ts || Date.now()});
